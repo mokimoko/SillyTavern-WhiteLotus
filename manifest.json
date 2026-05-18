@@ -1,0 +1,12 @@
+{
+    "display_name": "White Lotus",
+    "loading_order": 20,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Cee & Claude",
+    "version": "0.2.0",
+    "homePage": "https://github.com/nrahis/SillyTavern-WhiteLotus",
+    "description": "Companion extension for the White Lotus preset. Provides GUI-based parameter management, toggleable modules, trackers, and lorebook generation utilities."
+}
