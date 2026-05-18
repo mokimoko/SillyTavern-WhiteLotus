@@ -1,0 +1,152 @@
+<!-- REFERENCE — Lotus Board HTML display template -->
+<!-- This is the regex replacement HTML the user designed for the Lotus Board display. -->
+<!-- Capture groups: $1=date, $2=time, $3=location, $4=present, $5=health, $6=hunger, -->
+<!-- $7=energy, $8=hygiene, $9=arousal, $10=appearance, $11=mood, $12=thought, -->
+<!-- $13=affection, $14=attraction, $15=trust -->
+
+<div style="
+  --bg-panel: rgba(18, 18, 22, 0.8);
+  --bg-nested: rgba(0, 0, 0, 0.2);
+  --border-color: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
+  --accent-primary: var(--SmartThemeQuoteColor, #aaccff);
+  --accent-secondary: var(--SmartThemeUnderlineColor, #8c8691);
+  --text-main: var(--text_color, #e2e0e4);
+  --text-muted: rgba(226, 224, 228, 0.6);
+  --font-sans: 'Inter', 'Helvetica Neue', sans-serif;
+  --font-serif: 'Noto Serif', serif;
+
+  position: relative;
+  max-width: 580px;
+  margin: 15px auto;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 0px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+">
+  <!-- THEME-MATCHING SHINE OVERLAY -->
+  <div style="
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0) 50%);
+  "></div>
+  
+  <!-- MAIN CONTENT WRAPPER -->
+  <div style="position: relative; z-index: 1;">
+
+    <!-- TOP HEADER -->
+    <div style="padding: 20px 24px; border-bottom: 1px solid var(--border-color);">
+      <div style="font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-primary); margin-bottom: 8px;">
+        Location Log
+      </div>
+      <div style="font-family: var(--font-serif); font-size: 1.6em; line-height: 1.2; color: var(--text-main);">
+        $3
+      </div>
+      <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.75em; color: var(--text-muted);">
+        <span><span style="color: var(--accent-secondary); opacity: 0.8;">DATE:</span> $1</span>
+        <span><span style="color: var(--accent-secondary); opacity: 0.8;">TIME:</span> $2</span>
+        <span><span style="color: var(--accent-secondary); opacity: 0.8;">PRESENT:</span> $4</span>
+      </div>
+    </div>
+
+    <!-- MAIN BODY -->
+    <div style="padding: 20px 24px;">
+
+      <!-- NARRATIVE SECTION -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; font-size: 0.85em; line-height: 1.6;">
+        <div>
+          <div style="font-size: 0.8em; font-weight: 600; letter-spacing: 0.1em; color: var(--accent-secondary); margin-bottom: 8px; text-transform: uppercase;">APPEARANCE</div>
+          <div style="color: var(--text-main);">$10</div>
+        </div>
+        <div>
+          <div style="font-size: 0.8em; font-weight: 600; letter-spacing: 0.1em; color: var(--accent-secondary); margin-bottom: 8px; text-transform: uppercase;">MOOD</div>
+          <div style="color: var(--text-main);">$11</div>
+        </div>
+      </div>
+
+      <!-- STATUS MATRIX (NESTED PANEL) -->
+      <div style="background-color: var(--bg-nested); border: 1px solid var(--border-color); padding: 16px; border-radius: 0px;">
+        <!-- Physical Stats -->
+        <div style="margin-bottom: 16px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 12px; text-align: center;">
+            <div>
+              <div style="font-size: 0.65em; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 4px;">HEALTH</div>
+              <div style="font-size: 1.1em; color: var(--text-main); font-family: var(--font-serif);">$5</div>
+            </div>
+            <div>
+              <div style="font-size: 0.65em; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 4px;">HUNGER</div>
+              <div style="font-size: 1.1em; color: var(--text-main); font-family: var(--font-serif);">$6</div>
+            </div>
+            <div>
+              <div style="font-size: 0.65em; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 4px;">ENERGY</div>
+              <div style="font-size: 1.1em; color: var(--text-main); font-family: var(--font-serif);">$7</div>
+            </div>
+            <div>
+              <div style="font-size: 0.65em; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 4px;">HYGIENE</div>
+              <div style="font-size: 1.1em; color: var(--text-main); font-family: var(--font-serif);">$8</div>
+            </div>
+            <div>
+              <div style="font-size: 0.65em; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 4px;">AROUSAL</div>
+              <div style="font-size: 1.1em; color: var(--text-main); font-family: var(--font-serif);">$9</div>
+            </div>
+          </div>
+        </div>
+        <!-- Relational Stats -->
+        <div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.7em; margin-bottom: 4px;">
+                <span style="color: var(--text-muted);">AFFECTION</span><span style="color: var(--accent-primary);">$13</span>
+              </div>
+              <div style="height: 3px; background: var(--border-color); border-radius: 0px;"><div style="height: 100%; width: $13%; background: var(--accent-primary); border-radius: 0px;"></div></div>
+            </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.7em; margin-bottom: 4px;">
+                <span style="color: var(--text-muted);">ATTRACTION</span><span style="color: var(--accent-primary);">$14</span>
+              </div>
+              <div style="height: 3px; background: var(--border-color); border-radius: 0px;"><div style="height: 100%; width: $14%; background: var(--accent-primary); border-radius: 0px;"></div></div>
+            </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.7em; margin-bottom: 4px;">
+                <span style="color: var(--text-muted);">TRUST</span><span style="color: var(--accent-primary);">$15</span>
+              </div>
+              <div style="height: 3px; background: var(--border-color); border-radius: 0px;"><div style="height: 100%; width: $15%; background: var(--accent-primary); border-radius: 0px;"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- FOOTER: THOUGHT BLOCK -->
+    <div style="padding: 20px 24px; border-top: 1px solid var(--border-color); display: flex; align-items: flex-start; gap: 12px;">
+      <div style="
+        --icon: url('https://api.iconify.design/pepicons-print/quotes-left.svg');
+        flex-shrink: 0;
+        width: 1em;
+        height: 1em;
+        background-color: var(--accent-secondary);
+        -webkit-mask: var(--icon) no-repeat center / contain;
+        mask: var(--icon) no-repeat center / contain;
+        margin-top: 0.3em;
+        opacity: 0.7;
+      "></div>
+      <div style="
+        font-family: var(--font-serif);
+        font-style: italic;
+        font-size: 0.9em;
+        color: var(--text-muted);
+        line-height: 1.7;
+      ">
+        "$12"
+      </div>
+    </div>
+
+  </div>
+</div>

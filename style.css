@@ -1,0 +1,675 @@
+/* ============================================================
+   White Lotus Extension — Styles
+   Aesthetic: Nebula Dark — dark transparency, sharp corners,
+   muted palette, brightness-filter interactions
+   ============================================================ */
+
+/* UI component CSS (drawer takeovers, chatDesign) moved to UI Bedazzler */
+
+/* ── CSS Variables ─────────────────────────────────────── */
+:root {
+    --wl-bg: rgba(18, 18, 22, 0.95);
+    --wl-bg-section: rgba(0, 0, 0, 0.2);
+    --wl-border: rgba(255, 255, 255, 0.08);
+    --wl-border-hover: rgba(255, 255, 255, 0.15);
+    --wl-text: rgba(207, 203, 197, 1);
+    --wl-text-muted: rgba(207, 203, 197, 0.5);
+    --wl-accent: rgba(151, 167, 198, 1);
+    --wl-accent-dim: rgba(151, 167, 198, 0.4);
+    --wl-toggle-on: rgba(151, 167, 198, 0.85);
+    --wl-toggle-off: rgba(255, 255, 255, 0.1);
+    --wl-panel-width: 300px;
+}
+
+/* ── Trigger Button (floating) ──────────────────────────── */
+#wl-trigger-btn {
+    position: fixed;
+    top: 10px;
+    right: 20px;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--wl-bg);
+    border: 1px solid var(--wl-border);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    color: rgba(207, 203, 197, 0.4);
+    transition: background 0.2s ease, border-color 0.2s ease,
+                color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+#wl-trigger-btn:hover {
+    background: rgba(30, 30, 36, 0.95);
+    border-color: var(--wl-border-hover);
+    color: var(--wl-accent);
+    transform: translateY(-1px);
+}
+
+#wl-trigger-btn.wl-active {
+    color: var(--wl-text);
+}
+
+#wl-trigger-btn.wl-active:hover {
+    color: var(--wl-accent);
+    border-color: var(--wl-accent-dim);
+}
+
+#wl-trigger-btn.wl-btn-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#wl-trigger-btn .wl-cancel-icon {
+    display: none;
+    font-size: 14px;
+}
+
+#wl-trigger-btn.wl-generating .wl-lotus-icon {
+    display: none;
+}
+
+#wl-trigger-btn.wl-generating .wl-cancel-icon {
+    display: block;
+}
+
+#wl-trigger-btn.wl-generating {
+    animation: wl-pulse 2s ease-in-out infinite;
+    cursor: pointer;
+}
+
+#wl-trigger-btn.wl-generating:hover {
+    animation: none;
+    color: #ff7675;
+    border-color: rgba(255, 118, 117, 0.4);
+}
+
+@keyframes wl-pulse {
+    0%, 100% { color: rgba(207, 203, 197, 0.4); border-color: var(--wl-border); }
+    50% { color: var(--wl-accent); border-color: var(--wl-accent-dim); }
+}
+
+#wl-trigger-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* ── Side Panel ────────────────────────────────────────── */
+#wl-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: var(--wl-panel-width);
+    height: 100vh;
+    background: var(--wl-bg);
+    border-left: 1px solid var(--wl-border);
+    z-index: 1000;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+}
+
+#wl-panel.wl-panel-open {
+    transform: translateX(0);
+}
+
+/* ── Panel Header ──────────────────────────────────────── */
+.wl-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--wl-border);
+    flex-shrink: 0;
+}
+
+.wl-panel-title-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+}
+
+.wl-panel-title {
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--wl-text-muted);
+}
+
+/* ── Header Dropdown Menu ──────────────────────────────── */
+.wl-panel-menu-trigger {
+    cursor: pointer;
+    font-size: 0.55em;
+    color: var(--wl-text-muted);
+    opacity: 0.5;
+    transition: opacity 0.15s ease, transform 0.2s ease;
+    padding: 2px 3px;
+    line-height: 1;
+}
+
+.wl-panel-menu-trigger:hover {
+    opacity: 0.9;
+}
+
+.wl-panel-menu-trigger.wl-menu-active {
+    opacity: 0.9;
+    transform: rotate(180deg);
+}
+
+.wl-panel-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 160px;
+    background: var(--wl-bg);
+    border: 1px solid var(--wl-border-hover);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+}
+
+.wl-panel-menu.wl-menu-open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.wl-panel-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    font-size: 0.75em;
+    color: var(--wl-text);
+    cursor: pointer;
+    transition: background 0.1s ease;
+    white-space: nowrap;
+}
+
+.wl-panel-menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.wl-panel-menu-item i {
+    font-size: 0.9em;
+    opacity: 0.6;
+    width: 14px;
+    text-align: center;
+}
+
+.wl-panel-close {
+    cursor: pointer;
+    color: var(--wl-text-muted);
+    font-size: 0.85em;
+    filter: brightness(0.6);
+    transition: filter 0.2s ease;
+    line-height: 1;
+}
+
+.wl-panel-close:hover {
+    filter: brightness(1);
+}
+
+/* ── Panel Body ────────────────────────────────────────── */
+.wl-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--wl-accent-dim) transparent;
+}
+
+.wl-panel-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.wl-panel-body::-webkit-scrollbar-thumb {
+    background: var(--wl-accent-dim);
+}
+
+.wl-panel-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ── Status Indicator ──────────────────────────────────── */
+.wl-panel-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    margin-bottom: 8px;
+    font-size: 0.72em;
+    color: var(--wl-text-muted);
+    letter-spacing: 0.04em;
+}
+
+.wl-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    flex-shrink: 0;
+    transition: background 0.3s ease;
+}
+
+.wl-status-dot.wl-status-active {
+    background: var(--wl-accent);
+    box-shadow: 0 0 6px var(--wl-accent-dim);
+}
+
+/* ── Sections ──────────────────────────────────────────── */
+.wl-section {
+    margin-bottom: 2px;
+}
+
+.wl-section-header {
+    padding: 8px 16px;
+    font-size: 0.65em;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--wl-text-muted);
+    background: var(--wl-bg-section);
+    border-top: 1px solid var(--wl-border);
+    border-bottom: 1px solid var(--wl-border);
+    cursor: default;
+    user-select: none;
+}
+
+/* ── Collapsible sections (settings view only) ─────────── */
+#wl-view-settings .wl-section-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: color 0.15s ease;
+}
+
+#wl-view-settings .wl-section-header:hover {
+    color: var(--wl-text);
+}
+
+#wl-view-settings .wl-section-header::after {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 3.5px solid transparent;
+    border-right: 3.5px solid transparent;
+    border-top: 4px solid currentColor;
+    opacity: 0.4;
+    transition: transform 0.2s ease;
+}
+
+#wl-view-settings .wl-section.wl-section-collapsed .wl-section-header::after {
+    transform: rotate(-90deg);
+}
+
+.wl-section-body {
+    padding: 6px 0;
+}
+
+#wl-view-settings .wl-section-body {
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+}
+
+#wl-view-settings .wl-section.wl-section-collapsed .wl-section-body {
+    max-height: 0;
+    opacity: 0;
+    padding: 0;
+}
+
+/* ── Control Row ───────────────────────────────────────── */
+.wl-control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 16px;
+    gap: 12px;
+}
+
+.wl-sampler-row {
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wl-label {
+    font-size: 0.78em;
+    color: var(--wl-text);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.wl-toggle-icon {
+    margin-right: 5px;
+    font-size: 0.85em;
+    opacity: 0.4;
+}
+
+/* ── Select Dropdowns ──────────────────────────────────── */
+.wl-select {
+    flex: 1;
+    max-width: 180px;
+    min-width: 0;
+    padding: 4px 6px;
+    font-size: 0.72em;
+    color: #e0e0e0;
+    background: rgb(22, 22, 26);
+    border: 1px solid var(--wl-border);
+    border-radius: 0;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+    appearance: none;
+    -webkit-appearance: none;
+    /* Custom arrow */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='rgba(224,224,224,0.5)'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    padding-right: 18px;
+}
+
+.wl-select:hover {
+    border-color: var(--wl-border-hover);
+    color: #fff;
+}
+
+.wl-select:focus {
+    border-color: var(--wl-accent-dim);
+}
+
+.wl-select:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.wl-select option {
+    background: rgb(22, 22, 26);
+    color: #e0e0e0;
+    padding: 2px 6px;
+}
+
+.wl-select option:checked {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.wl-select optgroup {
+    background: rgb(18, 18, 22);
+    color: rgba(255, 255, 255, 0.45);
+    font-style: normal;
+    font-size: 0.9em;
+    font-weight: 600;
+    padding: 2px 0;
+}
+
+.wl-select optgroup option {
+    color: #e0e0e0;
+    font-weight: 400;
+    padding-left: 8px;
+}
+
+/* ── Toggle Switch ─────────────────────────────────────── */
+.wl-toggle {
+    position: relative;
+    display: inline-block;
+    width: 32px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.wl-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.wl-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--wl-toggle-off);
+    border: 1px solid var(--wl-border);
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.wl-toggle-slider::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 10px;
+    background: var(--wl-text-muted);
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.wl-toggle input:checked + .wl-toggle-slider {
+    background: rgba(151, 167, 198, 0.15);
+    border-color: var(--wl-accent-dim);
+}
+
+.wl-toggle input:checked + .wl-toggle-slider::before {
+    transform: translateY(-50%) translateX(14px);
+    background: var(--wl-accent);
+}
+
+.wl-toggle input:disabled + .wl-toggle-slider {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* ── Disabled state for controls ───────────────────────── */
+.wl-section-body:has(.wl-select:disabled) .wl-label,
+.wl-section-body:has(.wl-toggle input:disabled) .wl-label {
+    opacity: 0.3;
+}
+
+/* ── Tracker Actions ───────────────────────────────────── */
+.wl-tracker-actions {
+    justify-content: flex-end;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--wl-border);
+}
+
+.wl-btn {
+    background: transparent;
+    border: 1px solid var(--wl-border);
+    color: var(--wl-text);
+    padding: 4px 12px;
+    font-size: 0.78em;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: filter 0.15s ease, border-color 0.15s ease;
+}
+
+.wl-btn:hover {
+    filter: brightness(1.3);
+    border-color: var(--wl-accent-dim);
+}
+
+.wl-btn:active {
+    filter: brightness(0.9);
+}
+
+.wl-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: none;
+}
+
+/* ── Settings View ─────────────────────────────────────── */
+.wl-hidden {
+    display: none !important;
+}
+
+.wl-panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wl-panel-gear {
+    cursor: pointer;
+    font-size: 1.05em;
+    opacity: 0.5;
+    transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.wl-panel-gear:hover {
+    opacity: 0.9;
+    filter: brightness(1.3);
+}
+
+.wl-panel-pin {
+    cursor: pointer;
+    font-size: 0.82em;
+    color: var(--wl-text-muted);
+    opacity: 0.5;
+    transition: opacity 0.15s ease, transform 0.2s ease, color 0.15s ease;
+    transform: rotate(45deg);
+}
+
+.wl-panel-pin:hover {
+    opacity: 0.8;
+    color: var(--wl-text);
+}
+
+.wl-panel-pin.wl-pinned {
+    opacity: 1;
+    transform: rotate(0deg);
+    color: var(--wl-accent);
+}
+
+.wl-settings-back {
+    font-size: 0.78em;
+    opacity: 0.5;
+    cursor: pointer;
+    padding: 6px 0 12px;
+    transition: opacity 0.15s ease;
+}
+
+.wl-settings-back:hover {
+    opacity: 0.9;
+}
+
+.wl-setting-hint {
+    font-size: 0.72em;
+    opacity: 0.4;
+    line-height: 1.5;
+    padding: 4px 0 8px;
+}
+
+.wl-input-number {
+    width: 70px;
+    background: transparent;
+    border: 1px solid var(--wl-border);
+    color: var(--wl-text);
+    padding: 3px 6px;
+    font-size: 0.82em;
+    text-align: center;
+}
+
+.wl-input-number:focus {
+    outline: none;
+    border-color: var(--wl-accent-dim);
+}
+
+.wl-about-text {
+    font-size: 0.78em;
+    opacity: 0.4;
+}
+
+/* ── Panel Footer (Payload) ──────────────────────────── */
+.wl-panel-footer {
+    position: relative;
+    flex-shrink: 0;
+    border-top: 1px solid var(--wl-border);
+    padding: 8px 16px;
+    font-size: 0.72em;
+    color: var(--wl-text-muted);
+    cursor: default;
+    user-select: none;
+}
+
+.wl-payload-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.wl-payload-badge {
+    font-variant-numeric: tabular-nums;
+    transition: color 0.3s ease;
+}
+
+.wl-payload-breakdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    background: var(--wl-bg);
+    border-top: 1px solid var(--wl-border);
+    padding: 0 16px;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.wl-panel-footer:hover .wl-payload-breakdown {
+    max-height: 200px;
+    opacity: 1;
+    padding: 8px 16px;
+}
+
+.wl-payload-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 0;
+    font-size: 0.95em;
+    color: var(--wl-text-muted);
+}
+
+.wl-payload-row span:last-child {
+    font-variant-numeric: tabular-nums;
+    color: var(--wl-accent-dim);
+}
+
+/* ── Mobile ────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    #wl-trigger-btn {
+        top: 8px;
+        right: 8px;
+        width: 36px;
+        height: 36px;
+    }
+
+    #wl-trigger-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    #wl-panel {
+        width: 100vw;
+        border-left: none;
+    }
+}
