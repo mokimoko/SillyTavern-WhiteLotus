@@ -612,9 +612,12 @@ function onPromptReady(eventData) {
     // Strip legacy tracker wrapper blocks if any exist from old sessions
     let stripped = 0;
     for (const msg of chatMessages) {
-        if (msg.content && typeof msg.content === 'string' && TRACKER_BLOCK_RE.test(msg.content)) {
-            msg.content = msg.content.replace(TRACKER_BLOCK_RE, '').trimEnd();
-            stripped++;
+        if (msg.content && typeof msg.content === 'string') {
+            TRACKER_BLOCK_RE.lastIndex = 0;
+            if (TRACKER_BLOCK_RE.test(msg.content)) {
+                msg.content = msg.content.replace(TRACKER_BLOCK_RE, '').trimEnd();
+                stripped++;
+            }
         }
     }
     if (stripped > 0) {

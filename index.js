@@ -6,7 +6,7 @@
 // into the panel, preset bridge, payload counter, and settings.
 
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
-import { getContext, extension_settings } from '../../../extensions.js';
+import { extension_settings } from '../../../extensions.js';
 import { oai_settings } from '../../../openai.js';
 import { ConnectionManagerRequestService } from '../../../extensions/shared.js';
 
@@ -66,7 +66,7 @@ function calculatePayload() {
         }
     }
 
-    const charCounts = { Core: 0, Setup: 0, Parameters: 0, Tweaks: 0, Fixes: 0, Tools: 0, Display: 0, NSFW: 0, Trackers: 0 };
+    const charCounts = { Core: 0, Parameters: 0, Tweaks: 0, Fixes: 0, Tools: 0, NSFW: 0, Trackers: 0 };
 
     for (const id of enabledIds) {
         const content = contentById[id];
@@ -107,7 +107,7 @@ function updatePayloadDisplay() {
 
     if (breakdown) {
         const lines = [];
-        const order = ['Core', 'Setup', 'Parameters', 'Tweaks', 'Fixes', 'Tools', 'Display', 'NSFW', 'Trackers'];
+        const order = ['Core', 'Parameters', 'Tweaks', 'Fixes', 'Tools', 'NSFW', 'Trackers'];
         for (const cat of order) {
             const t = result.tokens[cat] || 0;
             if (t > 0) {
@@ -423,11 +423,6 @@ function buildPanelHTML() {
         <div class="wl-panel-header">
             <div class="wl-panel-title-group">
                 <div class="wl-panel-title">White Lotus</div>
-                <div class="wl-panel-menu-trigger" id="wl-panel-menu-trigger" title="Actions">
-                    <i class="fa-solid fa-chevron-down"></i>
-                </div>
-                <div class="wl-panel-menu" id="wl-panel-menu">
-                </div>
             </div>
             <div class="wl-panel-header-actions">
                 <div class="wl-panel-pin" id="wl-panel-pin" title="Pin panel open"><i class="fa-solid fa-thumbtack"></i></div>
@@ -456,7 +451,7 @@ function buildPanelHTML() {
                 <div class="wl-settings-back" id="wl-settings-back">← Back to Controls</div>
 
                 <!-- Tracker Generation -->
-                <div class="wl-section wl-section-collapsed" data-section="tracker-gen">
+                <div class="wl-section" data-section="tracker-gen">
                     <div class="wl-section-header">Tracker Generation</div>
                     <div class="wl-section-body">
                         ${buildToggleRow('useSeparateGen', 'Use separate generation')}
@@ -489,7 +484,7 @@ function buildPanelHTML() {
                 </div>
 
                 <!-- Gen Parameters -->
-                <div class="wl-section wl-section-collapsed" data-section="gen-params">
+                <div class="wl-section" data-section="gen-params">
                     <div class="wl-section-header">Generation Parameters</div>
                     <div class="wl-section-body">
                         <div class="wl-control-row">
@@ -504,12 +499,7 @@ function buildPanelHTML() {
                 </div>
 
                 <!-- About -->
-                <div class="wl-section wl-section-collapsed" data-section="about">
-                    <div class="wl-section-header">About</div>
-                    <div class="wl-section-body">
-                        <div class="wl-about-text">White Lotus Extension v0.2.0</div>
-                    </div>
-                </div>
+                <div class="wl-about-text">White Lotus Extension v0.2.0</div>
 
             </div><!-- end wl-view-settings -->
 
@@ -631,13 +621,6 @@ function wirePanelEvents(panel) {
         }
     });
 
-    // Section collapse/expand (settings view only)
-    panel.querySelectorAll('#wl-view-settings .wl-section-header').forEach(header => {
-        header.addEventListener('click', () => {
-            header.closest('.wl-section')?.classList.toggle('wl-section-collapsed');
-        });
-    });
-
     // Gear icon — toggle between controls and settings views
     panel.querySelector('#wl-panel-gear')?.addEventListener('click', () => {
         const controls = panel.querySelector('#wl-view-controls');
@@ -751,39 +734,6 @@ function wirePanelEvents(panel) {
         });
     });
 
-    // Header dropdown menu
-    const menuTrigger = panel.querySelector('#wl-panel-menu-trigger');
-    const menuDropdown = panel.querySelector('#wl-panel-menu');
-    if (menuTrigger && menuDropdown) {
-        menuTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            menuDropdown.classList.toggle('wl-menu-open');
-            menuTrigger.classList.toggle('wl-menu-active');
-        });
-
-        // Close menu on outside click
-        document.addEventListener('click', () => {
-            menuDropdown.classList.remove('wl-menu-open');
-            menuTrigger.classList.remove('wl-menu-active');
-        });
-
-        // Menu item actions
-        menuDropdown.addEventListener('click', (e) => {
-            const item = e.target.closest('.wl-panel-menu-item');
-            if (!item) return;
-            e.stopPropagation();
-
-            const action = item.dataset.action;
-            menuDropdown.classList.remove('wl-menu-open');
-            menuTrigger.classList.remove('wl-menu-active');
-
-            switch (action) {
-                // Menu actions (Chat Design moved to UI Bedazzler)
-                default: break;
-            }
-        });
-    }
-
     // Settings view: useSeparateGen toggle controls sub-option visibility
     const sepGenToggle = panel.querySelector('.wl-toggle input[data-key="useSeparateGen"]');
     if (sepGenToggle) {
@@ -842,10 +792,11 @@ function refreshPanelUI() {
         }
     }
 
-    // Disable controls if preset not active
+    // Disable controls if preset not active (except sampler — useful for any preset)
     const controlsView = panel.querySelector('#wl-view-controls');
     if (controlsView) {
         controlsView.querySelectorAll('.wl-select, .wl-toggle input').forEach(el => {
+            if (el.id === 'wl-sampler-preset') return;
             el.disabled = !isWhiteLotusActive;
         });
     }
@@ -887,19 +838,7 @@ function refreshPanelUI() {
 
 function getActiveSettings() {
     if (!isWhiteLotusActive) return null;
-
-    const context = getContext();
-    const settings = getSettings();
-
-    if (context.characterId !== undefined) {
-        const characters = context.characters;
-        const char = characters?.[context.characterId];
-        if (char?.avatar && settings.profiles?.[char.avatar]) {
-            return { ...settings, ...settings.profiles[char.avatar] };
-        }
-    }
-
-    return settings;
+    return getSettings();
 }
 
 // ============================================================

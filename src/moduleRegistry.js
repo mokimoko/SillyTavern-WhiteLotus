@@ -47,17 +47,6 @@ export const TOGGLES = {
 // ============================================================
 
 export const EXCLUSIVE_GROUPS = {
-    modelFamily: {
-        category: 'Setup',
-        label: 'Model Family',
-        settingDefault: '',
-        options: {
-            '':       { label: 'None',     promptId: '77647009-b4f9-4ca1-ad32-da0aa6c7eedd' },
-            glm:      { label: 'GLM',      promptId: '6179d1ca-c72f-41c3-9aeb-c94ad211bb74' },
-            deepseek: { label: 'Deepseek', promptId: '17ace0f3-f5b5-4c9d-99a1-8a82f417e630' },
-            kimi:     { label: 'Kimi',     promptId: '5a25ca18-47da-47ba-ae08-f6bba75928bf' },
-        },
-    },
     length: {
         category: 'Parameters',
         label: 'Length',
@@ -189,12 +178,6 @@ export const INFRA = {
 
 export const UI_SECTIONS = [
     {
-        id: 'setup',
-        label: 'Setup',
-        type: 'selects',
-        groups: ['modelFamily'],
-    },
-    {
         id: 'parameters',
         label: 'Parameters',
         type: 'mixed',
@@ -227,12 +210,6 @@ __SELECT:pov:POV:1st=1st Person,2nd=2nd Person,3rd=3rd Person__`,
         label: 'Tools',
         type: 'toggles',
         category: 'Tools',
-    },
-    {
-        id: 'display',
-        label: 'Display',
-        type: 'toggles',
-        category: 'Display',
     },
     {
         id: 'trackers',
