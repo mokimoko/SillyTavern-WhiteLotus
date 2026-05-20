@@ -287,47 +287,8 @@
     user-select: none;
 }
 
-/* ── Collapsible sections (settings view only) ─────────── */
-#wl-view-settings .wl-section-header {
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    transition: color 0.15s ease;
-}
-
-#wl-view-settings .wl-section-header:hover {
-    color: var(--wl-text);
-}
-
-#wl-view-settings .wl-section-header::after {
-    content: '';
-    width: 0;
-    height: 0;
-    border-left: 3.5px solid transparent;
-    border-right: 3.5px solid transparent;
-    border-top: 4px solid currentColor;
-    opacity: 0.4;
-    transition: transform 0.2s ease;
-}
-
-#wl-view-settings .wl-section.wl-section-collapsed .wl-section-header::after {
-    transform: rotate(-90deg);
-}
-
 .wl-section-body {
     padding: 6px 0;
-}
-
-#wl-view-settings .wl-section-body {
-    overflow: hidden;
-    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
-}
-
-#wl-view-settings .wl-section.wl-section-collapsed .wl-section-body {
-    max-height: 0;
-    opacity: 0;
-    padding: 0;
 }
 
 /* ── Control Row ───────────────────────────────────────── */
@@ -560,7 +521,7 @@
     font-size: 0.78em;
     opacity: 0.5;
     cursor: pointer;
-    padding: 6px 0 12px;
+    padding: 6px 16px 12px;
     transition: opacity 0.15s ease;
 }
 
@@ -572,7 +533,7 @@
     font-size: 0.72em;
     opacity: 0.4;
     line-height: 1.5;
-    padding: 4px 0 8px;
+    padding: 4px 16px 8px;
 }
 
 .wl-input-number {
@@ -593,6 +554,7 @@
 .wl-about-text {
     font-size: 0.78em;
     opacity: 0.4;
+    padding: 8px 16px;
 }
 
 /* ── Panel Footer (Payload) ──────────────────────────── */

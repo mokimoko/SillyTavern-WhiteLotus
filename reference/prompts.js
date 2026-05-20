@@ -1,77 +1,94 @@
-// REFERENCE — Lotus Board STscript prompt (to be converted to generateRaw)
-// This is the user's original STscript implementation for reference.
-// The extension will adapt this into a JS-based generateRaw call.
+// REFERENCE — Tracker Generation Architecture
+//
+// This file documents how tracker prompts are sourced and executed.
+// The extension does NOT contain hardcoded prompt text — it pulls
+// tracker instructions from the preset's prompt entries at runtime.
+//
+// ═══════════════════════════════════════════════════════════
+// Architecture: Two Modes
+// ═══════════════════════════════════════════════════════════
+//
+// 1. PRESET MODE (useSeparateGen = false)
+//    - Tracker prompts live in the preset's prompt list (oai_settings.prompts)
+//    - Extension toggles them on/off via the prompt order
+//    - LLM writes bracket tags inline in its response
+//    - SillyTavern regex scripts style the tags for display
+//    - No separate generation call needed
+//
+// 2. SEPARATE GEN MODE (useSeparateGen = true)
+//    - Tracker prompt entries are DISABLED in the preset (not sent to main LLM)
+//    - After each main generation, the extension runs a separate generateRaw call
+//    - It pulls the prompt TEXT from the preset entries as instructions
+//    - Parsed results are stored in chat_metadata, displayed as DOM overlays
+//    - Never touches msg.mes — avoids the reload/wipe issues
+//
+// ═══════════════════════════════════════════════════════════
+// Prompt Source: Preset Entries (Single Source of Truth)
+// ═══════════════════════════════════════════════════════════
+//
+// Each tracker has a prompt entry in the preset JSON, identified by UUID:
+//
+//   trackerLotusBoard  → 042279e6-820f-4e9d-aec1-a3e5b37f8453
+//   trackerTemporal    → 3ade7755-3093-4116-98b9-37d2efe6d1f0
+//   trackerRelationship → fe1afd93-8e59-4902-b6ca-10ef32d49401
+//
+// These IDs are registered in moduleRegistry.js → TRACKERS.
+// The extension reads prompt.content from these entries at generation time.
+//
+// ═══════════════════════════════════════════════════════════
+// Sep-Gen Prompt Structure (built by utilitiesGen.js)
+// ═══════════════════════════════════════════════════════════
+//
+// The generateRaw prompt is assembled from:
+//
+//   1. System framing — identifies {{char}} as the evaluation target
+//   2. Character context — card fields, persona, cached world info
+//   3. Recent conversation — last N message pairs (configurable scan depth)
+//   4. Previous state — latest tracker values for continuity
+//   5. Instructions — strict output format rules
+//   6. Format rules — from preset entry (INFRA.trackerFormatRulesId)
+//   7. Tracker instructions — from each active tracker's preset entry
+//
+// The model responds with ONLY bracket-tagged sections:
+//
+//   [LOTUS|Name|HP|HNG|ENG|HYG|ARO|Mood|Thought][/LOTUS]
+//   [TEMPORAL|Time|Weather|Location][/TEMPORAL]
+//   [RPS|CharName|HOS|INT|OBL|TRS|ATR][/RPS]
+//
+// See regex-patterns.md for full format documentation.
+//
+// ═══════════════════════════════════════════════════════════
+// NPC & Location Sheet Templates
+// ═══════════════════════════════════════════════════════════
+//
+// Used by the NPC Crafter tool (toolNPCCrafter) for generating
+// structured character and location entries.
 
-/*
-/profile | /setvar key=profile |
-/profile await=true Trackers |
-/genraw lock=off as=system 
-"You are evaluating stats for a roleplay. You will be evaluating stats for: {{char}}  
-== INITIALIZATION ==
-If a field is blank/empty, initialize it from the context. Do this on the first evaluation only. Once set, maintain continuity.
-== EVALUATION ==
-Update every field every evaluation based on what happened in the latest exchange. When evaluating stats, ensure a realistic progression.  Stats may remain the same if nothing has changed. 
-You will use the following context to establish
-/if left={{getvar::trackerCache}} rule=eq right= else={: 
-	{{char}}'s Existing Stats:
-	{{getvar::trackerCache}}
-:} {: 
-	/echo No tracker stats yet  
-:} |
-{{char}}'s last message: {{lastCharMessage}}
-{{user}}'s last message: {{lastUserMessage}}
-Use this EXACT format:
-<lotus_board>
-World State
-Date: [Weekday, Month Day, Year] | [Season] | [Temp]
-Time: [Scene time]
-Location: [Location]
-Social
-Present: [NPCs present]
-Character State
-Health: [n]/100 | Hunger: [n]/100 | Energy: [n]/100 | Hygiene: [n]/100 | Arousal: [n]/100
-Appearance: [Current appearance and outfit]
-Mood: [Current mood/mental state]
-Thought: *[An internal, private thought]*
-Relationship
-Affection: [n]/100 | Attraction: [n]/100 | Trust: [n]/100
-</lotus_board>  
-Only respond with the stats between the XML tags." |
-/setvar key=trackerCache {{pipe}} |
-/profile await=true {{getvar::profile}} |
-/wait 1000 |
-/message-edit message={{lastMessageId}} append= {{newline}}{{newline}}{{getvar::trackerCache}} |
-/echo Stats done |
-/flushvar profile |
-*/
-
-// NPC Sheet template (for NPC Save feature):
 /*
 [SHEET]
-Full Name: 
+Full Name:
 Also called:
 Archetype:
 Traits: (top 3)
 Appearance: (1-2 sentence)
 Background: (concise history)
 Affiliation: (if any)
-Core Belief: 
-Primary Locations: (comma separated list of named locations where this character can usually be found)
+Core Belief:
+Primary Locations: (comma separated list)
 Schedule: (on their typical day)
-Long-term Goal: 
+Long-term Goal:
 Short-term Goals:
 [/SHEET]
 */
 
-// Location Sheet template (for Location Save feature):
 /*
 [LSHEET]
 Official Name:
-Also called: 
-Region: 
-Adjacent: 
-Type: 
-Appearance: 
+Also called:
+Region:
+Adjacent:
+Type:
+Appearance:
 Relevance:
 [/LSHEET]
 */
