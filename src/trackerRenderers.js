@@ -6,6 +6,8 @@
 // These are used by the overlay rendering system in utilitiesGen.js —
 // they never touch msg.mes; they produce ephemeral DOM elements.
 
+import { getSettings } from './settings.js';
+
 const log = (...args) => console.log('[WL Renderers]', ...args);
 
 // ============================================================
@@ -34,8 +36,8 @@ const WEATHER_EMOJI = {
 
 /**
  * Parse Status Board bracket blocks into fields.
- * New format (v2, multi-entry, no Present field):
- *   [LOTUS|Name|HP|HNG|ENG|HYG|ARO|Mood|Thought][/LOTUS]
+ * Format (v2.1, multi-entry):
+ *   [LOTUS|Name|HP|HNG|ENG|HYG|ARO|Mood|Location|Attire|Thought][/LOTUS]
  * One per character present in the scene.
  *
  * @param {string} raw - Full bracket-tagged string (may contain multiple entries)
@@ -44,8 +46,8 @@ const WEATHER_EMOJI = {
 function parseLotus(raw) {
     const entries = [];
 
-    // Strict: with closing tag
-    const reStrict = /\[LOTUS\|([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*(.+?)\]?\s*\[\/LOTUS\]/gis;
+    // Strict: with closing tag — 10 fields: Name|HP|HNG|ENG|HYG|ARO|Mood|Location|Attire|Thought
+    const reStrict = /\[LOTUS\|([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([\s\S]*?)\]\s*\[\/LOTUS\]/gis;
     let m;
     while ((m = reStrict.exec(raw)) !== null) {
         entries.push({
@@ -56,13 +58,15 @@ function parseLotus(raw) {
             hygiene: parseInt(m[5], 10),
             arousal: parseInt(m[6], 10),
             mood:    m[7].trim(),
-            thought: m[8].trim().replace(/^\*|\*$/g, ''),
+            location: m[8].trim(),
+            attire:  m[9].trim(),
+            thought: m[10].trim().replace(/^\*|\*$/g, ''),
         });
     }
 
     // Fallback: no closing tag (LLM often omits it)
     if (entries.length === 0) {
-        const reFallback = /\[LOTUS\|([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*([^\]]+?)\]/gi;
+        const reFallback = /\[LOTUS\|([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^\]]+?)\]/gi;
         while ((m = reFallback.exec(raw)) !== null) {
             entries.push({
                 name:    m[1].trim(),
@@ -72,7 +76,9 @@ function parseLotus(raw) {
                 hygiene: parseInt(m[5], 10),
                 arousal: parseInt(m[6], 10),
                 mood:    m[7].trim(),
-                thought: m[8].trim().replace(/^\*|\*$/g, ''),
+                location: m[8].trim(),
+                attire:  m[9].trim(),
+                thought: m[10].trim().replace(/^\*|\*$/g, ''),
             });
         }
         if (entries.length > 0) {
@@ -180,6 +186,10 @@ export function buildLotusOverlay(raw) {
                 `</div>` +
                 // Mood
                 `<div style="margin-top:7px;"><b style="color:#fdcb6e;opacity:0.85;text-transform:uppercase;font-size:0.72em;letter-spacing:0.08em;">Mood</b> ${escHtml(d.mood)}</div>` +
+                // Location
+                `<div style="margin-top:5px;"><b style="color:#74b9ff;opacity:0.85;text-transform:uppercase;font-size:0.72em;letter-spacing:0.08em;">Location</b> ${escHtml(d.location)}</div>` +
+                // Attire
+                `<div style="margin-top:5px;"><b style="color:#81ecec;opacity:0.85;text-transform:uppercase;font-size:0.72em;letter-spacing:0.08em;">Attire</b> ${escHtml(d.attire)}</div>` +
                 // Thought
                 (d.thought
                     ? `<div style="margin-top:8px;padding:7px 9px;border-radius:8px;background:rgba(0,0,0,0.14);color:#dfe6e9;font-style:italic;opacity:0.88;">✦ ${escHtml(d.thought)}</div>`
@@ -263,18 +273,85 @@ const BUILDERS = {
 };
 
 /**
+ * Build overlay HTML for a custom user-defined tracker.
+ * Strips wrapper tags, runs the user's regex find/replace, falls back to raw text.
+ *
+ * @param {string} rawTag - Raw bracket-tagged string from parser
+ * @param {object} customDef - Custom tracker definition from settings
+ * @returns {string|null} HTML string or null
+ */
+function buildCustomOverlay(rawTag, customDef) {
+    const tag = customDef.tag;
+
+    // Strip wrapper tags. Models often collapse content into a pipe-tag style
+    // [TAG|content][/TAG] instead of the requested [TAG]content[/TAG] because
+    // the surrounding built-in trackers all use pipe-in-tag format. We accept
+    // both shapes so the user's regex operates on the same inner content
+    // either way.
+    let inner = rawTag;
+
+    // Try bracket-style wrapper first: [TAG]content[/TAG]
+    let wrapMatch = rawTag.match(new RegExp(`\\[${tag}\\]([\\s\\S]*?)\\[/${tag}\\]`, 'i'));
+
+    // Fall back to pipe-style wrapper: [TAG|content][/TAG] (model variant)
+    if (!wrapMatch) {
+        wrapMatch = rawTag.match(new RegExp(`\\[${tag}\\|([\\s\\S]*?)\\]\\s*\\[/${tag}\\]`, 'i'));
+    }
+
+    if (wrapMatch) {
+        inner = wrapMatch[1].trim();
+    } else {
+        // Final fallback: strip just an opening tag of either shape
+        inner = rawTag.replace(new RegExp(`^\\[${tag}(?:\\|[^\\]]*)?\\]\\s*`, 'i'), '').trim();
+    }
+
+    if (!inner) return null;
+
+    // Try user's regex find/replace
+    if (customDef.regexFind) {
+        try {
+            const findRe = new RegExp(customDef.regexFind, 'gi');
+            const replaced = inner.replace(findRe, customDef.regexReplace || '');
+            if (replaced && replaced !== inner) {
+                return `<div class="${OVERLAY_CLASS}" data-wl-tracker="custom" data-wl-custom-id="${escAttr(customDef.id)}">${replaced}</div>`;
+            }
+        } catch (e) {
+            log(`Custom tracker regex error (${customDef.label}):`, e.message);
+        }
+    }
+
+    // Fallback: raw text in a basic styled container
+    return `<div class="${OVERLAY_CLASS}" data-wl-tracker="custom" data-wl-custom-id="${escAttr(customDef.id)}" ` +
+        `style="margin:8px 0;font-size:0.82em;opacity:0.86;padding:8px 12px;border:1px solid rgba(255,255,255,0.10);` +
+        `background:linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012));font-family:monospace;">` +
+        `<div style="font-size:0.72em;text-transform:uppercase;letter-spacing:0.08em;opacity:0.5;margin-bottom:4px;">${escHtml(customDef.label)}</div>` +
+        `${escHtml(inner)}</div>`;
+}
+
+/**
  * Build overlay HTML for a tracker entry.
- * @param {string} trackerKey - e.g. 'trackerLotusBoard'
+ * Routes built-in trackers to their dedicated builders,
+ * custom trackers to the generic regex-based builder.
+ *
+ * @param {string} trackerKey - e.g. 'trackerLotusBoard' or 'custom_abc123'
  * @param {string} rawTag - Raw bracket-tagged string from parser
  * @returns {string|null} HTML string or null if key unknown / parse fails
  */
 export function buildTrackerOverlay(trackerKey, rawTag) {
+    // Built-in tracker
     const builder = BUILDERS[trackerKey];
-    if (!builder) {
-        log(`buildTrackerOverlay: no builder for key '${trackerKey}'`);
-        return null;
+    if (builder) return builder(rawTag);
+
+    // Custom tracker — look up definition from settings
+    if (trackerKey.startsWith('custom_')) {
+        const settings = getSettings();
+        const customId = trackerKey.slice(7);
+        const customDef = (settings.customTrackers || []).find(ct => ct.id === customId);
+        if (customDef) return buildCustomOverlay(rawTag, customDef);
     }
-    return builder(rawTag);
+
+    log(`buildTrackerOverlay: no builder for key '${trackerKey}'`);
+    return null;
 }
 
 /**

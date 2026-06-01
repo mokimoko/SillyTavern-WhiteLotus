@@ -35,6 +35,9 @@ const INFRA_DEFAULTS = {
     utilityMaxTokens: 2000,
     utilityTemperature: 0.7,
 
+    // --- Custom Trackers ---
+    customTrackers: [],  // Array of { id, label, tag, prompt, regexFind, regexReplace, multiEntry, enabled }
+
     // --- Interface (moved to UI Bedazzler) ---
     // presetDrawerTakeover, userSettingsDrawerTakeover, personaDrawerTakeover,
     // charDrawerTakeover, worldInfoDrawerTakeover, personaDesigns, chatDesign,
