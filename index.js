@@ -66,7 +66,7 @@ function calculatePayload() {
         }
     }
 
-    const charCounts = { Core: 0, Parameters: 0, Tweaks: 0, Fixes: 0, Tools: 0, NSFW: 0, Trackers: 0 };
+    const charCounts = { Main: 0, Core: 0, Parameters: 0, Tweaks: 0, Fixes: 0, Tools: 0, NSFW: 0, Trackers: 0 };
 
     for (const id of enabledIds) {
         const content = contentById[id];
@@ -107,7 +107,7 @@ function updatePayloadDisplay() {
 
     if (breakdown) {
         const lines = [];
-        const order = ['Core', 'Parameters', 'Tweaks', 'Fixes', 'Tools', 'NSFW', 'Trackers'];
+        const order = ['Main', 'Core', 'Parameters', 'Tweaks', 'Fixes', 'Tools', 'NSFW', 'Trackers'];
         for (const cat of order) {
             const t = result.tokens[cat] || 0;
             if (t > 0) {
@@ -133,23 +133,20 @@ let detectedVariant = null;
 // ============================================================
 
 /**
- * Check if the current preset is White Lotus by looking for fingerprint field or name.
+ * Check if the current preset is White Lotus by name.
+ * Only presets with "White Lotus" in the name are managed by this extension.
  */
 function detectWhiteLotusPreset() {
-    // Method 1: Parse preset name
     const presetName = oai_settings.preset_settings_openai || '';
-    const nameMatch = presetName.match(/WHITE\s*LOTUS\s*\[(\d+\.\d+\.\d+)\](?:\s*\[(.+?)\])?/i);
-    if (nameMatch) {
-        return { active: true, version: nameMatch[1], variant: nameMatch[2] || null };
+
+    // Versioned format: WHITE LOTUS [2.0.0] or WHITE LOTUS [2.0.0] [Variant]
+    const versionMatch = presetName.match(/WHITE\s*LOTUS\s*\[(\d+\.\d+\.\d+)\](?:\s*\[(.+?)\])?/i);
+    if (versionMatch) {
+        return { active: true, version: versionMatch[1], variant: versionMatch[2] || null };
     }
 
-    // Method 2: Signature prompt IDs from registry
-    if (!Array.isArray(oai_settings.prompts)) return { active: false, version: null, variant: null };
-
-    const promptIds = new Set(oai_settings.prompts.map(p => p.identifier));
-    const matchCount = INFRA.signatureIds.filter(id => promptIds.has(id)).length;
-
-    if (matchCount >= 3) {
+    // Unversioned fallback: any preset name containing "White Lotus"
+    if (/white\s*lotus/i.test(presetName)) {
         return { active: true, version: null, variant: null };
     }
 
@@ -168,14 +165,14 @@ function refreshPresetDetection() {
         log('White Lotus preset detected ✓',
             detectedVersion ? `v${detectedVersion}` : '(unversioned)',
             detectedVariant ? `[${detectedVariant}]` : '');
-        syncSettingsFromPreset();
+        applySettingsToPreset();
         updateTriggerButton();
     } else if (isWhiteLotusActive && wasActive && detectedVersion !== prevVersion) {
-        // Switched between WL preset versions — re-sync
+        // Switched between WL preset versions — re-apply stored settings
         log('White Lotus preset version changed:',
             prevVersion ? `v${prevVersion}` : '(unversioned)', '→',
             detectedVersion ? `v${detectedVersion}` : '(unversioned)');
-        syncSettingsFromPreset();
+        applySettingsToPreset();
         updateTriggerButton();
     } else if (!isWhiteLotusActive && wasActive) {
         log('White Lotus preset no longer active');
@@ -191,7 +188,9 @@ function refreshPresetDetection() {
 }
 
 /**
- * On first detection, read current preset state into extension settings.
+ * Read current preset state into extension settings (one-time bootstrap).
+ * NOT used in the normal activation flow — applySettingsToPreset() handles that.
+ * Kept for potential future use (e.g. "Reset to preset defaults" button).
  */
 function syncSettingsFromPreset() {
     const presetState = readPresetState();
@@ -211,6 +210,29 @@ function syncSettingsFromPreset() {
 
     saveSettingsDebounced();
     log('Synced settings from preset state', skipKeys.size ? `(skipped ${skipKeys.size} tracker keys — useSeparateGen active)` : '');
+}
+
+/**
+ * Apply stored extension settings TO the preset's prompt order.
+ * Called when WL becomes active — ensures the preset reflects user's saved settings
+ * rather than overwriting them with whatever the preset file has.
+ */
+function applySettingsToPreset() {
+    const settings = getSettings();
+
+    for (const key of TOGGLE_KEYS) {
+        applyToggle(key, !!settings[key]);
+    }
+
+    for (const key of TRACKER_KEYS) {
+        applyTrackerToggle(key, !!settings[key]);
+    }
+
+    for (const key of GROUP_KEYS) {
+        applyExclusiveGroup(key, settings[key]);
+    }
+
+    log('Applied stored settings to preset');
 }
 
 // ============================================================
@@ -385,9 +407,13 @@ function buildSectionHTML(section) {
         rows += section.suffix;
     }
 
+    const collapsibleClass = section.collapsible ? ' wl-collapsible' : '';
+    const collapsedClass = section.collapsed ? ' wl-collapsed' : '';
+    const chevronHtml = section.collapsible ? '<span class="wl-section-chevron">▸</span>' : '';
+
     return `
-        <div class="wl-section" data-section="${section.id}">
-            <div class="wl-section-header">${section.label}</div>
+        <div class="wl-section${collapsibleClass}${collapsedClass}" data-section="${section.id}">
+            <div class="wl-section-header">${chevronHtml}${section.label}</div>
             <div class="wl-section-body">${rows}</div>
         </div>`;
 }
@@ -498,6 +524,16 @@ function buildPanelHTML() {
                     </div>
                 </div>
 
+                <!-- Custom Trackers -->
+                <div class="wl-section" data-section="custom-trackers">
+                    <div class="wl-section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span>Custom Trackers</span>
+                        <span class="wl-ct-add" id="wl-ct-add" title="Add custom tracker" style="cursor:pointer;font-size:1em;opacity:0.5;line-height:1;">+</span>
+                    </div>
+                    <div class="wl-section-body" id="wl-ct-list"></div>
+                    <div class="wl-setting-hint">User-defined trackers for sep-gen pipeline. Each needs a bracket tag, prompt, and regex for rendering.</div>
+                </div>
+
                 <!-- About -->
                 <div class="wl-about-text">White Lotus Extension v0.2.0</div>
 
@@ -604,12 +640,153 @@ function applySettingToPreset(key, value) {
 }
 
 // ============================================================
+// Custom Tracker UI
+// ============================================================
+
+/** Generate a short random ID for new custom trackers */
+function generateCtId() {
+    return Math.random().toString(36).slice(2, 9);
+}
+
+/**
+ * Render the custom tracker list in the settings panel.
+ * Rebuilds the entire list from settings and wires per-card events.
+ */
+function renderCustomTrackerList() {
+    const container = document.getElementById('wl-ct-list');
+    if (!container) return;
+
+    const settings = getSettings();
+    const trackers = settings.customTrackers || [];
+
+    if (trackers.length === 0) {
+        container.innerHTML = '<div style="padding:8px 16px;font-size:0.72em;opacity:0.35;text-align:center;font-style:italic;">No custom trackers</div>';
+        return;
+    }
+
+    container.innerHTML = trackers.map((ct, i) => `
+        <div class="wl-ct-card" data-ct-idx="${i}" data-ct-id="${ct.id}">
+            <div class="wl-ct-card-header">
+                <span class="wl-ct-chevron">▾</span>
+                <span class="wl-ct-name">${ct.label || 'Untitled'}</span>
+                <span class="wl-ct-tag">${ct.tag || '—'}</span>
+                <label class="wl-toggle wl-ct-toggle">
+                    <input type="checkbox" ${ct.enabled ? 'checked' : ''} data-ct-field="enabled">
+                    <span class="wl-toggle-slider"></span>
+                </label>
+            </div>
+            <div class="wl-ct-card-body" style="display:none;">
+                <div class="wl-ct-field-row">
+                    <div class="wl-ct-field" style="flex:1;">
+                        <div class="wl-ct-field-label">Label</div>
+                        <input class="wl-ct-input" data-ct-field="label" value="${escAttr(ct.label || '')}">
+                    </div>
+                    <div class="wl-ct-field" style="width:60px;">
+                        <div class="wl-ct-field-label">Tag</div>
+                        <input class="wl-ct-input" data-ct-field="tag" value="${escAttr(ct.tag || '')}">
+                    </div>
+                </div>
+                <div class="wl-ct-field-row" style="padding:2px 0;">
+                    <span style="font-size:0.72em;color:var(--wl-text-muted);">Multi-entry</span>
+                    <label class="wl-toggle" style="width:26px;height:13px;">
+                        <input type="checkbox" ${ct.multiEntry ? 'checked' : ''} data-ct-field="multiEntry">
+                        <span class="wl-toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="wl-ct-field">
+                    <div class="wl-ct-field-label">Prompt</div>
+                    <textarea class="wl-ct-input wl-ct-textarea wl-ct-textarea-tall" data-ct-field="prompt">${escHtml(ct.prompt || '')}</textarea>
+                </div>
+                <div class="wl-ct-field">
+                    <div class="wl-ct-field-label">Regex find</div>
+                    <textarea class="wl-ct-input wl-ct-textarea" data-ct-field="regexFind">${escHtml(ct.regexFind || '')}</textarea>
+                </div>
+                <div class="wl-ct-field">
+                    <div class="wl-ct-field-label">Regex replace</div>
+                    <textarea class="wl-ct-input wl-ct-textarea" data-ct-field="regexReplace">${escHtml(ct.regexReplace || '')}</textarea>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;padding-top:4px;border-top:1px solid var(--wl-border);">
+                    <span class="wl-ct-action wl-ct-delete" data-ct-action="delete">delete</span>
+                    <span class="wl-ct-action" data-ct-action="duplicate">duplicate</span>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    // Wire per-card events
+    container.querySelectorAll('.wl-ct-card').forEach(card => {
+        const idx = parseInt(card.dataset.ctIdx, 10);
+
+        // Expand/collapse
+        card.querySelector('.wl-ct-card-header').addEventListener('click', (e) => {
+            if (e.target.closest('.wl-ct-toggle')) return;
+            const body = card.querySelector('.wl-ct-card-body');
+            const chevron = card.querySelector('.wl-ct-chevron');
+            const open = body.style.display !== 'none';
+            body.style.display = open ? 'none' : '';
+            chevron.classList.toggle('wl-ct-chevron-open', !open);
+        });
+
+        // Field changes
+        card.querySelectorAll('[data-ct-field]').forEach(input => {
+            const field = input.dataset.ctField;
+            const event = input.type === 'checkbox' ? 'change' : 'input';
+            input.addEventListener(event, () => {
+                const s = getSettings();
+                const val = input.type === 'checkbox' ? input.checked : input.value;
+                s.customTrackers[idx][field] = val;
+                saveSettingsDebounced();
+
+                // Update collapsed card display
+                if (field === 'label') card.querySelector('.wl-ct-name').textContent = val || 'Untitled';
+                if (field === 'tag') card.querySelector('.wl-ct-tag').textContent = val || '—';
+            });
+        });
+
+        // Actions
+        card.querySelectorAll('[data-ct-action]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const s = getSettings();
+                if (btn.dataset.ctAction === 'delete') {
+                    s.customTrackers.splice(idx, 1);
+                } else if (btn.dataset.ctAction === 'duplicate') {
+                    const clone = JSON.parse(JSON.stringify(s.customTrackers[idx]));
+                    clone.id = generateCtId();
+                    clone.label += ' (copy)';
+                    s.customTrackers.splice(idx + 1, 0, clone);
+                }
+                saveSettingsDebounced();
+                renderCustomTrackerList();
+            });
+        });
+    });
+}
+
+/** Escape for HTML attributes */
+function escAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Escape for HTML content */
+function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ============================================================
 // Panel Event Wiring
 // ============================================================
 
 function wirePanelEvents(panel) {
     // Close button
     panel.querySelector('#wl-panel-close')?.addEventListener('click', closePanel);
+
+    // Collapsible section headers
+    panel.querySelectorAll('.wl-section.wl-collapsible .wl-section-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const section = header.closest('.wl-section');
+            if (section) section.classList.toggle('wl-collapsed');
+        });
+    });
 
     // Pin button — toggle pinned state (prevents click-outside close)
     panel.querySelector('#wl-panel-pin')?.addEventListener('click', () => {
@@ -766,6 +943,26 @@ function wirePanelEvents(panel) {
         autoRunSelect.addEventListener('change', updateNVisibility);
         updateNVisibility();
     }
+
+    // Custom tracker: add button
+    panel.querySelector('#wl-ct-add')?.addEventListener('click', () => {
+        const s = getSettings();
+        s.customTrackers.push({
+            id: generateCtId(),
+            label: '',
+            tag: 'CUSTOM',
+            prompt: '',
+            regexFind: '',
+            regexReplace: '',
+            multiEntry: false,
+            enabled: false,
+        });
+        saveSettingsDebounced();
+        renderCustomTrackerList();
+    });
+
+    // Initial render
+    renderCustomTrackerList();
 }
 
 // ============================================================
@@ -829,6 +1026,7 @@ function refreshPanelUI() {
     const nRow = panel.querySelector('#wl-autorun-n-row');
     if (nRow) nRow.style.display = settings.utilityAutoRun === 'every_n' ? '' : 'none';
 
+    renderCustomTrackerList();
     updatePayloadDisplay();
 }
 
@@ -837,6 +1035,16 @@ function refreshPanelUI() {
 // ============================================================
 
 function getActiveSettings() {
+    // Lightweight guard — if the preset name no longer contains "White Lotus",
+    // force inactive. Catches stale state when OAI_PRESET_CHANGED_AFTER is missing.
+    if (isWhiteLotusActive) {
+        const presetName = oai_settings.preset_settings_openai || '';
+        if (!/white\s*lotus/i.test(presetName)) {
+            log('Preset name no longer matches — deactivating');
+            isWhiteLotusActive = false;
+        }
+    }
+
     if (!isWhiteLotusActive) return null;
     return getSettings();
 }

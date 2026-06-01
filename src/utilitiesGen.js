@@ -29,11 +29,80 @@ const logError = (...args) => console.error('[WL Utilities]', ...args);
 const TRACKER_BLOCK_RE = /<!--WL_TRACKER_START-->[\s\S]*?<!--WL_TRACKER_END-->/g;
 
 // ============================================================
+// Custom Tracker Helpers
+// ============================================================
+
+/**
+ * Get enabled custom tracker definitions from settings.
+ * @returns {object[]} Array of custom tracker defs with valid tag + prompt
+ */
+function getActiveCustomTrackers() {
+    const settings = getSettings();
+    return (settings.customTrackers || []).filter(ct => ct.enabled && ct.tag && ct.prompt);
+}
+
+/**
+ * Get ALL custom tracker defs (enabled or not) — for state management.
+ */
+function getAllCustomTrackers() {
+    const settings = getSettings();
+    return settings.customTrackers || [];
+}
+
+/** Setting key for a custom tracker: 'custom_{id}' */
+function customKey(ct) {
+    return `custom_${ct.id}`;
+}
+
+/**
+ * Get all effective tracker keys (built-in + custom).
+ * Used everywhere TRACKER_KEYS was used before.
+ */
+function getEffectiveKeys() {
+    return [...TRACKER_KEYS, ...getAllCustomTrackers().map(customKey)];
+}
+
+/**
+ * Get the tracker definition for a key (built-in or custom).
+ * @param {string} key - e.g. 'trackerLotusBoard' or 'custom_abc123'
+ * @returns {object|null} Tracker-like definition
+ */
+function getTrackerDef(key) {
+    if (TRACKERS[key]) return TRACKERS[key];
+    if (key.startsWith('custom_')) {
+        const id = key.slice(7);
+        const ct = getAllCustomTrackers().find(c => c.id === id);
+        if (ct) return { label: ct.label, bracketTag: ct.tag, multiEntry: ct.multiEntry || false, isCustom: true, ...ct };
+    }
+    return null;
+}
+
+/**
+ * Check if a tracker key is active (enabled in settings).
+ * Built-in trackers check settings[key], custom trackers check the enabled flag.
+ */
+function isTrackerActive(key) {
+    if (TRACKERS[key]) return !!getSettings()[key];
+    if (key.startsWith('custom_')) {
+        const id = key.slice(7);
+        return getActiveCustomTrackers().some(ct => ct.id === id);
+    }
+    return false;
+}
+
+/**
+ * Get all bracket tags (built-in + active custom).
+ */
+function getEffectiveBracketTags() {
+    return [...ALL_BRACKET_TAGS, ...getActiveCustomTrackers().map(ct => ct.tag)];
+}
+
+// ============================================================
 // State
 // ============================================================
 
 /** Latest parsed tracker data, persists across messages.
- *  Keyed by tracker setting key (e.g. 'trackerLotusBoard'). */
+ *  Keyed by tracker setting key (e.g. 'trackerLotusBoard', 'custom_abc123'). */
 let latestTrackerState = Object.fromEntries(TRACKER_KEYS.map(k => [k, null]));
 
 /** Tracks how many messages since last utility gen (for every_n mode) */
@@ -65,7 +134,7 @@ export function getLatestTrackerState() {
  * Reset tracker state (e.g. on chat change).
  */
 export function resetTrackerState() {
-    latestTrackerState = Object.fromEntries(TRACKER_KEYS.map(k => [k, null]));
+    latestTrackerState = Object.fromEntries(getEffectiveKeys().map(k => [k, null]));
     cachedWorldInfo = [];
     messagesSinceLastGen = 0;
     isGenerating = false;
@@ -82,7 +151,9 @@ export function resetTrackerState() {
 export function hasActiveTrackers() {
     const s = getSettings();
     if (!s.useSeparateGen) return false;
-    return TRACKER_KEYS.some(key => s[key]);
+    const builtInActive = TRACKER_KEYS.some(key => s[key]);
+    const customActive = getActiveCustomTrackers().length > 0;
+    return builtInActive || customActive;
 }
 
 // ============================================================
@@ -130,7 +201,7 @@ function loadTrackerStateFromMetadata() {
         const entrySwipeId = entry.swipeId ?? 0;
 
         if (entrySwipeId === activeSwipeId && entry.data) {
-            for (const key of TRACKER_KEYS) {
+            for (const key of getEffectiveKeys()) {
                 if (entry.data[key]) {
                     latestTrackerState[key] = entry.data[key];
                 }
@@ -177,7 +248,7 @@ async function storeTrackerResult(parsed) {
 
     // Build data object (only non-null entries)
     const data = {};
-    for (const key of TRACKER_KEYS) {
+    for (const key of getEffectiveKeys()) {
         if (parsed[key]) data[key] = parsed[key];
     }
 
@@ -350,6 +421,14 @@ function getPreviousStateString() {
         }
     }
 
+    // Custom trackers
+    for (const ct of getAllCustomTrackers()) {
+        const k = customKey(ct);
+        if (latestTrackerState[k]) {
+            parts.push(`Previous ${ct.label} state:\n${latestTrackerState[k]}`);
+        }
+    }
+
     return parts.length > 0 ? parts.join('\n\n') : '';
 }
 
@@ -442,6 +521,12 @@ function getTrackerPromptContent(settingKey, charName, userName) {
  * Build the full generateRaw prompt.
  * Pulls tracker instructions from the preset prompts (single source of truth).
  * Only includes instructions for active tracker modules.
+ *
+ * Structure (kept minimal to avoid confusing small models):
+ *   1. Role + conversation context
+ *   2. Tracker instructions (what to output)
+ *   3. Previous state (if any)
+ *   4. Output rules
  */
 function buildUtilityPrompt() {
     const settings = getSettings();
@@ -452,58 +537,80 @@ function buildUtilityPrompt() {
     const recentChat = getRecentMessages(settings.utilityScanDepth || 2);
     const previousState = getPreviousStateString();
 
-    let prompt = `You are evaluating stats and environmental data for a roleplay.
-You are tracking the AI CHARACTER named ${charName} — NOT the user/player (${userName}).
-All tracker fields (name, stats, mood, thoughts) should reflect ${charName}'s state, not ${userName}'s.
+    // Build the allowlist of tags valid for THIS response (only active trackers)
+    const activeBuiltInTags = TRACKER_KEYS
+        .filter(k => settings[k])
+        .map(k => TRACKERS[k].bracketTag);
+    const activeCustomTags = getActiveCustomTrackers().map(ct => ct.tag);
+    const allActiveTags = [...activeBuiltInTags, ...activeCustomTags];
+    const tagList = allActiveTags.map(t => `[${t}]`).join(', ');
+
+    // ---- Section 1: Role + Context ----
+    let prompt = `You are a data extraction system. Read the following roleplay conversation and output ONLY structured tracker data. Do not write narrative, dialogue, or commentary.
+
+<conversation>
+${recentChat}
+</conversation>
 
 `;
 
-    // Character card, persona, and world info context
-    const characterContext = buildCharacterContext();
-    if (characterContext) {
-        prompt += characterContext;
-    }
-
-    prompt += `== RECENT CONVERSATION ==\n${recentChat}\n\n`;
-
-    if (previousState) {
-        prompt += `== PREVIOUS STATE ==\n${previousState}\n\n`;
-    } else {
-        prompt += `Note: This is the first evaluation. Initialize all fields from the context provided.\n\n`;
-    }
-
-    prompt += `== INSTRUCTIONS ==
-Your response must contain ONLY the bracket-tagged tracker sections listed below.
-Do NOT include:
-- Reasoning, commentary, or explanations
-- System labels or headers (e.g. [SYSTEM: ...], [ANALYSIS: ...])
-- Any bracket tags other than the exact ones specified below
-- Preamble or closing remarks
-If a tag is not listed below, do not invent it. Begin your response with the first tracker tag and end with the last closing tag.
-
+    // ---- Section 2: Tracker Instructions ----
+    prompt += `<trackers>
 `;
 
-    // Include shared Tracker Format Rules from the preset (if available)
-    const rulesId = INFRA.trackerFormatRulesId;
-    if (rulesId) {
-        const rulesPrompt = findPrompt(rulesId);
-        if (rulesPrompt?.content) {
-            const rulesContent = rulesPrompt.content
-                .replace(/\{\{\/\/.*?\}\}/g, '')
-                .replace(/\{\{trim\}\}/gi, '')
-                .trim();
-            if (rulesContent) {
-                prompt += `== FORMAT RULES ==\n${rulesContent}\n\n`;
+    // Include shared format rules only when built-in trackers are active
+    const hasActiveBuiltIn = TRACKER_KEYS.some(k => settings[k]);
+    if (hasActiveBuiltIn) {
+        const rulesId = INFRA.trackerFormatRulesId;
+        if (rulesId) {
+            const rulesPrompt = findPrompt(rulesId);
+            if (rulesPrompt?.content) {
+                const rulesContent = rulesPrompt.content
+                    .replace(/\{\{\/\/.*?\}\}/g, '')
+                    .replace(/\{\{trim\}\}/gi, '')
+                    .trim();
+                if (rulesContent) {
+                    prompt += rulesContent + '\n\n';
+                }
+            }
+        }
+
+        // Built-in tracker definitions from preset
+        for (const key of TRACKER_KEYS) {
+            if (settings[key]) {
+                prompt += getTrackerPromptContent(key, charName, userName) + '\n\n';
             }
         }
     }
 
-    // Pull each active tracker's instructions from the preset
-    for (const key of TRACKER_KEYS) {
-        if (settings[key]) {
-            prompt += getTrackerPromptContent(key, charName, userName) + '\n\n';
-        }
+    // Custom tracker definitions
+    for (const ct of getActiveCustomTrackers()) {
+        const ctPrompt = ct.prompt
+            .replace(/\{\{char\}\}/gi, charName)
+            .replace(/\{\{user\}\}/gi, userName);
+        prompt += `${ctPrompt}
+
+Wrap this tracker's output in [${ct.tag}] and [/${ct.tag}].
+
+`;
     }
+
+    prompt += `</trackers>
+
+`;
+
+    // ---- Section 3: Previous State ----
+    if (previousState) {
+        prompt += `<previous_state>
+${previousState}
+</previous_state>
+
+`;
+    }
+
+    // ---- Section 4: Output Rules ----
+    prompt += `Output ONLY the following tags: ${tagList}
+No other text. No narrative. No explanation. Begin:`;
 
     return prompt;
 }
@@ -529,7 +636,7 @@ function extractSection(text, tag) {
     if (match) return match[0].trim();
 
     // Fallback for truncated responses
-    const allTags = ALL_BRACKET_TAGS.join('|');
+    const allTags = getEffectiveBracketTags().join('|');
     const fallbackRe = new RegExp(`\\[${tag}[|\\]][\\s\\S]*?(?=\\[(?:${allTags})[|\\]]|$)`, 'i');
     const fallbackMatch = text.match(fallbackRe);
     if (fallbackMatch && fallbackMatch[0].trim()) {
@@ -571,14 +678,61 @@ function extractAllSections(text, tag) {
  * @returns {object} Parsed sections keyed by tracker setting key
  */
 function parseUtilityResponse(rawResponse) {
-    const parsed = Object.fromEntries(TRACKER_KEYS.map(k => [k, null]));
+    const allKeys = getEffectiveKeys();
+    const parsed = Object.fromEntries(allKeys.map(k => [k, null]));
 
+    // Built-in trackers — only parse ACTIVE ones, otherwise we'd accept
+    // tracker blocks the model produced uninvited (e.g. TEMPORAL appearing
+    // when the user only had Status Board + custom enabled).
     for (const [key, tracker] of Object.entries(TRACKERS)) {
+        if (!isTrackerActive(key)) continue;
         if (tracker.multiEntry) {
             const lines = extractAllSections(rawResponse, tracker.bracketTag);
             if (lines) parsed[key] = lines.join('\n');
         } else {
             parsed[key] = extractSection(rawResponse, tracker.bracketTag);
+        }
+    }
+
+    // Custom trackers — extract by their user-defined tag
+    for (const ct of getActiveCustomTrackers()) {
+        const k = customKey(ct);
+        if (ct.multiEntry) {
+            const lines = extractAllSections(rawResponse, ct.tag);
+            if (lines) parsed[k] = lines.join('\n');
+        } else {
+            // Custom tags: try bracket-style wrapper [TAG]...[/TAG] first
+            const re = new RegExp(`\\[${ct.tag}\\]([\\s\\S]*?)\\[/${ct.tag}\\]`, 'i');
+            const match = rawResponse.match(re);
+            if (match) {
+                parsed[k] = match[0].trim();
+            } else {
+                // Pipe-style fallback: [TAG|content][/TAG]
+                // Models often collapse into this shape because every built-in
+                // tracker in the prompt uses [TAG|val|val] format.
+                const pipeRe = new RegExp(`\\[${ct.tag}\\|[\\s\\S]*?\\]\\s*\\[/${ct.tag}\\]`, 'i');
+                const pipeMatch = rawResponse.match(pipeRe);
+                if (pipeMatch) {
+                    parsed[k] = pipeMatch[0].trim();
+                    log(`parseUtilityResponse: custom tracker '${ct.label}' captured pipe-style wrapper`);
+                } else {
+                    // Fallback 1: missing opening tag — LLM forgot [TAG] but kept [/TAG]
+                    const missingOpenRe = new RegExp(`(?:\\[/(?:${getEffectiveBracketTags().filter(t => t !== ct.tag).join('|')})\\]|^)([\\s\\S]*?)\\[/${ct.tag}\\]`, 'i');
+                    const om = rawResponse.match(missingOpenRe);
+                    if (om && om[1] && om[1].trim()) {
+                        parsed[k] = `[${ct.tag}]${om[1].trim()}[/${ct.tag}]`;
+                        log(`parseUtilityResponse: custom tracker '${ct.label}' recovered missing opening tag`);
+                    } else {
+                        // Fallback 2: missing closing tag — opening present, no closer
+                        const fallbackRe = new RegExp(`\\[${ct.tag}\\][\\s\\S]*?(?=\\[(?:${getEffectiveBracketTags().join('|')})[|\\]]|$)`, 'i');
+                        const fm = rawResponse.match(fallbackRe);
+                        if (fm && fm[0].trim()) {
+                            parsed[k] = fm[0].trim();
+                            log(`parseUtilityResponse: custom tracker '${ct.label}' used truncation fallback`);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -625,7 +779,7 @@ function onPromptReady(eventData) {
     }
 
     // Only inject state if trackers are relevant
-    const anyTrackerActive = TRACKER_KEYS.some(key => settings[key]);
+    const anyTrackerActive = TRACKER_KEYS.some(key => settings[key]) || getActiveCustomTrackers().length > 0;
     if (!anyTrackerActive) return;
 
     // Build state injection based on mode
@@ -658,7 +812,7 @@ function onPromptReady(eventData) {
  */
 function buildRawStateInjection() {
     const parts = [];
-    for (const key of TRACKER_KEYS) {
+    for (const key of getEffectiveKeys()) {
         if (latestTrackerState[key]) parts.push(latestTrackerState[key]);
     }
     if (parts.length === 0) return null;
@@ -687,14 +841,14 @@ function buildFormattedStateInjection() {
     // Status Board — per-character status (multiEntry)
     const lotus = latestTrackerState.trackerLotusBoard;
     if (lotus) {
-        const re = /\[LOTUS\|([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*(.+?)\]?(?:\s*\[\/LOTUS\])?/gi;
+        const re = /\[LOTUS\|([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([\s\S]*?)\]\s*\[\/LOTUS\]/gi;
         const charParts = [];
         let lm;
         while ((lm = re.exec(lotus)) !== null) {
             const name = lm[1].trim();
             charParts.push(
                 `${name} — HP: ${lm[2]}, Hunger: ${lm[3]}, Energy: ${lm[4]}, Hygiene: ${lm[5]}, Arousal: ${lm[6]}. ` +
-                `Mood: ${lm[7].trim()}.`,
+                `Mood: ${lm[7].trim()}. Location: ${lm[8].trim()}. Attire: ${lm[9].trim()}.`,
             );
         }
         if (charParts.length > 0) {
@@ -716,6 +870,19 @@ function buildFormattedStateInjection() {
         }
         if (relParts.length > 0) {
             parts.push(`Relationships with ${charName}:\n${relParts.join('\n')}`);
+        }
+    }
+
+    // Custom trackers — raw passthrough (we don't know their field structure)
+    for (const ct of getAllCustomTrackers()) {
+        const k = customKey(ct);
+        if (latestTrackerState[k]) {
+            // Strip wrapper tags for a cleaner injection
+            let inner = latestTrackerState[k];
+            const stripRe = new RegExp(`\\[${ct.tag}\\]([\\s\\S]*?)\\[/${ct.tag}\\]`, 'i');
+            const sm = inner.match(stripRe);
+            if (sm) inner = sm[1].trim();
+            parts.push(`${ct.label}: ${inner}`);
         }
     }
 
@@ -847,7 +1014,7 @@ export async function executeUtilitiesGen() {
         }
         if (targetMessageIndex >= 0) {
             const preState = getStateBeforeMessage(targetMessageIndex);
-            for (const key of TRACKER_KEYS) {
+            for (const key of getEffectiveKeys()) {
                 latestTrackerState[key] = preState[key] || null;
             }
             log(`Reverted tracker state to pre-message ${targetMessageIndex} (swipe-safe)`);
@@ -865,14 +1032,17 @@ export async function executeUtilitiesGen() {
             try {
                 const messages = [
                     { role: 'user', content: prompt },
+                    { role: 'assistant', content: '[' },
                 ];
                 const response = await ConnectionManagerRequestService.sendRequest(
                     settings.utilityConnectionProfile,
                     messages,
                     settings.utilityMaxTokens || 2000,
-                    { extractData: true, stream: false, includePreset: true },
+                    { extractData: true, stream: false, includePreset: false },
                 );
                 result = response?.content || '';
+                // Re-prepend the prefill character so the parser sees a complete first tag
+                if (result && !result.startsWith('[')) result = '[' + result;
             } catch (profileErr) {
                 logError('Connection profile request failed:', profileErr);
                 log('Falling back to generateRaw...');
@@ -907,23 +1077,38 @@ export async function executeUtilitiesGen() {
         log('Raw response:', result.substring(0, 500));
         log('Response total length:', result.length, 'chars');
 
-        // Log closing tag detection for each tracker
+        // Strip thinking/preamble before first '[' and trailing prose after last ']'
+        const firstBracket = result.indexOf('[');
+        const lastBracket = result.lastIndexOf(']');
+        if (firstBracket > 0 || (lastBracket >= 0 && lastBracket < result.length - 1)) {
+            const before = result.length;
+            if (firstBracket > 0) result = result.slice(firstBracket);
+            if (lastBracket >= 0 && lastBracket < result.length - 1) result = result.slice(0, lastBracket + 1);
+            log(`Stripped non-tag content: ${before} → ${result.length} chars`);
+        }
+
+        // Log closing tag detection for each ACTIVE tracker only
         const closingTags = {};
         for (const [key, tracker] of Object.entries(TRACKERS)) {
+            if (!isTrackerActive(key)) continue;
             closingTags[key] = result.includes(`[/${tracker.bracketTag}]`);
+        }
+        for (const ct of getActiveCustomTrackers()) {
+            closingTags[customKey(ct)] = result.includes(`[/${ct.tag}]`);
         }
         log('Closing tags found:', closingTags);
 
         // Parse
         const parsed = parseUtilityResponse(result);
         const parsedSummary = {};
-        for (const key of TRACKER_KEYS) {
+        for (const key of getEffectiveKeys()) {
+            if (!isTrackerActive(key)) continue;
             parsedSummary[key] = parsed[key] ? `${parsed[key].length} chars` : 'null';
         }
         log('Parsed sections:', parsedSummary);
 
         // Update in-memory state
-        for (const key of TRACKER_KEYS) {
+        for (const key of getEffectiveKeys()) {
             if (parsed[key]) latestTrackerState[key] = parsed[key];
         }
 
@@ -1055,7 +1240,7 @@ export function initUtilitiesGen(isActiveCheck) {
 
                 if (matchingEntry?.data) {
                     // This swipe has tracker data — render it and update state
-                    for (const key of TRACKER_KEYS) {
+                    for (const key of getEffectiveKeys()) {
                         if (matchingEntry.data[key]) {
                             latestTrackerState[key] = matchingEntry.data[key];
                         }
@@ -1065,7 +1250,7 @@ export function initUtilitiesGen(isActiveCheck) {
                 } else {
                     // No data for this swipe — revert to state before this message
                     const preState = getStateBeforeMessage(numericId);
-                    for (const key of TRACKER_KEYS) {
+                    for (const key of getEffectiveKeys()) {
                         latestTrackerState[key] = preState[key] || null;
                     }
                     log(`No tracker data for message ${numericId} swipe ${activeSwipeId} — reverted to pre-message state`);

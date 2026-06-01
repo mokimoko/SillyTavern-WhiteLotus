@@ -287,6 +287,33 @@
     user-select: none;
 }
 
+/* ── Collapsible Sections ──────────────────────────────── */
+.wl-section.wl-collapsible .wl-section-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.15s ease;
+}
+
+.wl-section.wl-collapsible .wl-section-header:hover {
+    color: var(--wl-text);
+}
+
+.wl-section-chevron {
+    font-size: 0.85em;
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.wl-section.wl-collapsible:not(.wl-collapsed) .wl-section-chevron {
+    transform: rotate(90deg);
+}
+
+.wl-section.wl-collapsed .wl-section-body {
+    display: none;
+}
+
 .wl-section-body {
     padding: 6px 0;
 }
@@ -634,4 +661,118 @@
         width: 100vw;
         border-left: none;
     }
+}
+
+/* ── Custom Tracker Cards ──────────────────────────────── */
+.wl-ct-card {
+    margin: 3px 10px;
+    border: 1px solid var(--wl-border);
+}
+
+.wl-ct-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    cursor: pointer;
+}
+
+.wl-ct-card-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.wl-ct-chevron {
+    font-size: 9px;
+    color: var(--wl-text-muted);
+    transition: transform 0.15s;
+}
+
+.wl-ct-chevron-open {
+    transform: rotate(180deg);
+}
+
+.wl-ct-name {
+    flex: 1;
+    font-size: 0.78em;
+    color: var(--wl-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wl-ct-tag {
+    font-size: 0.65em;
+    font-family: monospace;
+    color: var(--wl-accent-dim);
+}
+
+.wl-ct-toggle {
+    width: 26px;
+    height: 13px;
+    flex-shrink: 0;
+}
+
+.wl-ct-card-body {
+    padding: 6px 8px 8px;
+    border-top: 1px solid var(--wl-border);
+}
+
+.wl-ct-field {
+    margin-bottom: 5px;
+}
+
+.wl-ct-field-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.wl-ct-field-label {
+    font-size: 0.62em;
+    color: var(--wl-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 2px;
+}
+
+.wl-ct-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--wl-border);
+    color: var(--wl-text);
+    padding: 3px 5px;
+    font-size: 0.72em;
+    font-family: monospace;
+}
+
+.wl-ct-input:focus {
+    outline: none;
+    border-color: var(--wl-accent-dim);
+}
+
+.wl-ct-textarea {
+    resize: vertical;
+    min-height: 38px;
+    line-height: 1.4;
+}
+
+.wl-ct-textarea-tall {
+    min-height: 80px;
+}
+
+.wl-ct-action {
+    font-size: 0.68em;
+    color: var(--wl-text-muted);
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+.wl-ct-action:hover {
+    opacity: 1;
+}
+
+.wl-ct-delete:hover {
+    color: #ff7675;
 }

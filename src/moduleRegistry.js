@@ -14,6 +14,12 @@
 // ============================================================
 
 export const TOGGLES = {
+    // --- Main Prompt ---
+    mainLotusEngine:     { category: 'Main', label: 'Lotus Engine',      settingDefault: true, promptIds: ['72e0c614-9eb5-4353-b490-efbc5312f4a2'] },
+    mainPlotDevelopment: { category: 'Main', label: 'Plot Development',  settingDefault: true, promptIds: ['a386df99-dd2f-478a-89e3-e45918671d7e'] },
+    mainBetterDialogue:  { category: 'Main', label: 'Better Dialogue',   settingDefault: true, promptIds: ['858627d2-5433-4220-b3b5-91cf7d5e7806'] },
+    mainSceneManagement: { category: 'Main', label: 'Scene Management',  settingDefault: true, promptIds: ['2b20c5a0-f560-4911-bb9d-6c9b72854d7a'] },
+
     // --- Tweaks ---
     tweakNPCs:          { category: 'Tweaks', label: 'Better NPCs',      settingDefault: false, promptIds: ['aae6f802-1860-46e1-9d0a-4f30859adc18'] },
     tweakDisabilities:  { category: 'Tweaks', label: 'Disabilities',     settingDefault: false, promptIds: ['83392def-1a7d-46b0-9c03-1d9917cab4d7'] },
@@ -55,6 +61,7 @@ export const EXCLUSIVE_GROUPS = {
             super_short: { label: 'Super Short', promptId: 'b8461485-2fa3-43c0-b7d3-0f768105cd24' },
             short:       { label: 'Short',       promptId: '3a2050f5-b4b7-4e51-9b0f-eef5606ee843' },
             moderate:    { label: 'Moderate',     promptId: '7ee02f7d-af53-4abf-afd5-18bd12917f36' },
+            girthy:      { label: 'Girthy',       promptId: '157db729-1654-47f3-8ef3-de77f54e4b0f' },
             flexible:    { label: 'Flexible',     promptId: '8f1944bb-7f94-4e1a-ae23-1a8c20261ba0' },
         },
     },
@@ -90,9 +97,11 @@ export const EXCLUSIVE_GROUPS = {
             slice_of_life:      { label: 'Slice of Life',       promptId: '80848b52-e538-4497-8c33-20c26d809356' },
             sci_fi:             { label: 'Sci-Fi',              promptId: 'ca9fbc49-8c1f-42c5-b177-09ac82daa9e9' },
             regency:            { label: 'Regency',             promptId: 'e38fec8c-5858-4f38-8673-06564d42e96a' },
-            danmei_historical:  { label: 'Danmei (Historical)', promptId: 'da5ddfce-747a-4bc3-8e53-135d007ccce2' },
-            danmei_modern:      { label: 'Danmei (Modern)',     promptId: '96e86d28-0b07-41d0-96e0-bc960ed5da0a' },
+            danmei_historical:  { label: 'Historical Chinese', promptId: 'da5ddfce-747a-4bc3-8e53-135d007ccce2' },
+            danmei_modern:      { label: 'Modern Chinese',     promptId: '96e86d28-0b07-41d0-96e0-bc960ed5da0a' },
             litrpg:             { label: 'LitRPG',              promptId: '84be9b37-eacf-4cb2-b94d-da32a9878df5' },
+            space_opera:        { label: 'Space Opera',          promptId: 'ec56ce42-5911-4c8f-a191-c81724553aff' },
+            grimdark_comedy:    { label: 'Grimdark Comedy',      promptId: 'bb9d75e7-84c8-4b13-a576-03ef2a6b2716' },
         },
     },
     nsfwStyle: {
@@ -186,6 +195,14 @@ export const UI_SECTIONS = [
 __SELECT:pov:POV:1st=1st Person,2nd=2nd Person,3rd=3rd Person__`,
         groups: ['length', 'narratorType', 'diction', 'genre'],
         toggles: [],
+    },
+    {
+        id: 'main-prompt',
+        label: 'Main Prompt',
+        type: 'toggles',
+        category: 'Main',
+        collapsible: true,
+        collapsed: true,
     },
     {
         id: 'nsfw',
