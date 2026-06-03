@@ -139,10 +139,16 @@ let detectedVariant = null;
 function detectWhiteLotusPreset() {
     const presetName = oai_settings.preset_settings_openai || '';
 
-    // Versioned format: WHITE LOTUS [2.0.0] or WHITE LOTUS [2.0.0] [Variant]
+    // Versioned bracket format: WHITE LOTUS [2.0.0] or WHITE LOTUS [2.0.0] [Variant]
     const versionMatch = presetName.match(/WHITE\s*LOTUS\s*\[(\d+\.\d+\.\d+)\](?:\s*\[(.+?)\])?/i);
     if (versionMatch) {
         return { active: true, version: versionMatch[1], variant: versionMatch[2] || null };
+    }
+
+    // Hyphenated shipped format: white-lotus-3.0.0 (optionally trailing -variant)
+    const hyphenMatch = presetName.match(/white-lotus-(\d+\.\d+\.\d+)(?:-(.+))?/i);
+    if (hyphenMatch) {
+        return { active: true, version: hyphenMatch[1], variant: hyphenMatch[2] || null };
     }
 
     // Unversioned fallback: any preset name containing "White Lotus"
