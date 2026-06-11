@@ -24,8 +24,6 @@ import {
     resetTrackerState,
     triggerManualGen,
     hasActiveTrackers,
-    cancelUtilitiesGen,
-    isUtilitiesGenRunning,
 } from './src/utilitiesGen.js';
 // UI modules (presetDrawer, userSettingsDrawer, personaLore, charDrawer,
 // worldInfoDrawer, chatDesign) have moved to the UI Bedazzler extension.
@@ -263,14 +261,9 @@ function createTriggerButton() {
             <circle cx="12" cy="11" r="1.2" fill="currentColor" fill-opacity="0.5" stroke="none"/>
             <path d="M12 20v-4"/>
         </svg>
-        <i class="wl-cancel-icon fa-solid fa-xmark"></i>
     `;
     btn.addEventListener('click', () => {
-        if (isUtilitiesGenRunning()) {
-            cancelUtilitiesGen();
-        } else {
-            togglePanel();
-        }
+        togglePanel();
     });
     document.body.appendChild(btn);
     updateTriggerButton();
@@ -541,7 +534,7 @@ function buildPanelHTML() {
                 </div>
 
                 <!-- About -->
-                <div class="wl-about-text">White Lotus Extension v0.2.0</div>
+                <div class="wl-about-text">White Lotus Extension v0.2.1</div>
 
             </div><!-- end wl-view-settings -->
 
@@ -582,6 +575,13 @@ function getAffectedPromptIds(key) {
             if (opt.promptId) ids.push(opt.promptId);
         }
         if (group.masterToggleId) ids.push(group.masterToggleId);
+        // Include prompt IDs from linked toggles
+        if (group.linkedToggles) {
+            for (const toggleKey of Object.keys(group.linkedToggles)) {
+                const toggle = TOGGLES[toggleKey];
+                if (toggle) ids.push(...toggle.promptIds);
+            }
+        }
     }
 
     return ids;
@@ -841,6 +841,20 @@ function wirePanelEvents(panel) {
             setSetting(key, value);
             applySettingToPreset(key, value);
             syncPromptManagerDOM(getAffectedPromptIds(key));
+
+            // Sync linked toggles — update settings and panel checkboxes
+            if (key in EXCLUSIVE_GROUPS) {
+                const group = EXCLUSIVE_GROUPS[key];
+                if (group.linkedToggles) {
+                    for (const [toggleKey, enableValues] of Object.entries(group.linkedToggles)) {
+                        const shouldEnable = enableValues.includes(value);
+                        setSetting(toggleKey, shouldEnable);
+                        const cb = panel.querySelector(`.wl-toggle input[data-key="${toggleKey}"]`);
+                        if (cb) cb.checked = shouldEnable;
+                    }
+                }
+            }
+
             updatePayloadDisplay();
             log(`Setting changed: ${key} = ${value}`);
         });

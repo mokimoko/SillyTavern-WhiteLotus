@@ -63,35 +63,6 @@
     pointer-events: none;
 }
 
-#wl-trigger-btn .wl-cancel-icon {
-    display: none;
-    font-size: 14px;
-}
-
-#wl-trigger-btn.wl-generating .wl-lotus-icon {
-    display: none;
-}
-
-#wl-trigger-btn.wl-generating .wl-cancel-icon {
-    display: block;
-}
-
-#wl-trigger-btn.wl-generating {
-    animation: wl-pulse 2s ease-in-out infinite;
-    cursor: pointer;
-}
-
-#wl-trigger-btn.wl-generating:hover {
-    animation: none;
-    color: #ff7675;
-    border-color: rgba(255, 118, 117, 0.4);
-}
-
-@keyframes wl-pulse {
-    0%, 100% { color: rgba(207, 203, 197, 0.4); border-color: var(--wl-border); }
-    50% { color: var(--wl-accent); border-color: var(--wl-accent-dim); }
-}
-
 #wl-trigger-btn svg {
     width: 20px;
     height: 20px;

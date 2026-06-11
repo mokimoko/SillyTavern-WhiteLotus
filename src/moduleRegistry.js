@@ -16,9 +16,7 @@
 export const TOGGLES = {
     // --- Main Prompt ---
     mainLotusEngine:     { category: 'Main', label: 'Lotus Engine',      settingDefault: true, promptIds: ['72e0c614-9eb5-4353-b490-efbc5312f4a2'] },
-    mainPlotDevelopment: { category: 'Main', label: 'Plot Development',  settingDefault: true, promptIds: ['a386df99-dd2f-478a-89e3-e45918671d7e'] },
-    mainBetterDialogue:  { category: 'Main', label: 'Better Dialogue',   settingDefault: true, promptIds: ['858627d2-5433-4220-b3b5-91cf7d5e7806'] },
-    mainSceneManagement: { category: 'Main', label: 'Scene Management',  settingDefault: true, promptIds: ['2b20c5a0-f560-4911-bb9d-6c9b72854d7a'] },
+    mainUserAutonomy:    { category: 'Main', label: 'User Autonomy',     settingDefault: true, promptIds: ['4f6996e5-b902-45c2-9b8a-6255df7d715a'] },
 
     // --- Tweaks ---
     tweakNPCs:          { category: 'Tweaks', label: 'Better NPCs',      settingDefault: false, promptIds: ['aae6f802-1860-46e1-9d0a-4f30859adc18'] },
@@ -70,8 +68,14 @@ export const EXCLUSIVE_GROUPS = {
         label: 'Narrator',
         settingDefault: 'omniscient',
         options: {
-            omniscient: { label: 'Omniscient', promptId: 'daf44e20-d152-4d3c-b166-f516ecb56273' },
-            character:  { label: 'Character',  promptId: 'faecca79-3620-4433-9983-cd0387c8eece' },
+            omniscient:  { label: 'Omniscient',  promptId: 'daf44e20-d152-4d3c-b166-f516ecb56273' },
+            character:   { label: 'Character',   promptId: 'faecca79-3620-4433-9983-cd0387c8eece' },
+            storyteller: { label: 'Storyteller', promptId: 'a1262ebf-5543-44fb-b478-284d821a2d22' },
+        },
+        // linkedToggles: toggleKey → array of group values that ENABLE the toggle.
+        // Any other value (or null) disables it.
+        linkedToggles: {
+            mainUserAutonomy: ['omniscient', 'character'],
         },
     },
     diction: {
@@ -88,9 +92,9 @@ export const EXCLUSIVE_GROUPS = {
     genre: {
         category: 'Parameters',
         label: 'Genre',
-        settingDefault: null,
+        settingDefault: '',
         options: {
-            '':                 { label: 'None' },
+            '':                 { label: 'None',              promptId: 'd79819e5-691c-4ade-a978-d2d420c404ac' },
             contemporary:       { label: 'Contemporary',        promptId: '961bbf5e-82d8-452f-abd4-5ada4e7c641b' },
             dark_fantasy:       { label: 'Dark Fantasy',        promptId: '6720343a-8ecc-4b37-9f53-af398ede1bef' },
             southern_gothic:    { label: 'Southern Gothic',     promptId: 'e5d3f809-8737-4cb4-93da-4ff935e46e7f' },

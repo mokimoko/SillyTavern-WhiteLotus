@@ -29,6 +29,61 @@ const logError = (...args) => console.error('[WL Utilities]', ...args);
 const TRACKER_BLOCK_RE = /<!--WL_TRACKER_START-->[\s\S]*?<!--WL_TRACKER_END-->/g;
 
 // ============================================================
+// Stop Button Integration (native ST #mes_stop)
+// ============================================================
+//
+// During separate tracker gen the main generation is already finished, so
+// ST's stop button is hidden. We reuse it to cancel tracker gen: show it on
+// start, hide it on finish. A capture-phase listener intercepts the click and
+// routes it to cancelUtilitiesGen() before ST's own (no-op) stopGeneration().
+
+/** Saved value of body[data-generating] so we can restore it after tracker gen. */
+let prevGeneratingAttr = null;
+
+/** Capture-phase click handler — cancels tracker gen when the stop button is hit. */
+function onStopButtonClick(e) {
+    if (!isGenerating) return;
+    // Only react to the stop button itself
+    if (!e.target.closest('#mes_stop, .mes_stop')) return;
+    cancelUtilitiesGen();
+    // Don't preventDefault — ST's stopGeneration() is a harmless no-op here.
+}
+
+/** Show ST's native stop button and arm our cancel listener. */
+function showStopButtonForGen() {
+    const stop = document.getElementById('mes_stop');
+    if (stop) stop.style.display = 'flex';
+    // Mirror ST's generating state so the send button (and friends) hide.
+    // Save the prior value so we can restore it without clobbering a real gen.
+    if (typeof document !== 'undefined' && document.body) {
+        prevGeneratingAttr = document.body.getAttribute('data-generating');
+        document.body.setAttribute('data-generating', 'true');
+    }
+    // Capture phase so we run before ST's delegated bubble-phase handler.
+    document.addEventListener('click', onStopButtonClick, true);
+}
+
+/** Hide the stop button and disarm our listener (unless main gen still owns it). */
+function hideStopButtonForGen() {
+    document.removeEventListener('click', onStopButtonClick, true);
+    const stop = document.getElementById('mes_stop');
+    // Only hide if a real generation isn't in progress (don't steal it from main gen).
+    const streamingProcessor = typeof window !== 'undefined' ? window?.SillyTavern?.streamingProcessor : null;
+    const mainGenActive = streamingProcessor && !streamingProcessor.isFinished;
+    if (stop && !mainGenActive) stop.style.display = 'none';
+    // Restore the generating attribute to whatever it was before we ran,
+    // unless a real gen took over in the meantime.
+    if (typeof document !== 'undefined' && document.body && !mainGenActive) {
+        if (prevGeneratingAttr === null) {
+            document.body.removeAttribute('data-generating');
+        } else {
+            document.body.setAttribute('data-generating', prevGeneratingAttr);
+        }
+    }
+    prevGeneratingAttr = null;
+}
+
+// ============================================================
 // Custom Tracker Helpers
 // ============================================================
 
@@ -334,23 +389,24 @@ function getStateBeforeMessage(targetMessageIndex) {
  */
 function renderTrackerOverlay(entry) {
     const $msg = $(`#chat .mes[mesid="${entry.messageIndex}"]`);
-    if ($msg.length === 0) return;
+    if ($msg.length === 0) return false;
 
     // Only render for the currently active swipe
     const context = getContext();
     const msg = context.chat?.[entry.messageIndex];
     const activeSwipeId = msg?.swipe_id ?? 0;
     const entrySwipeId = entry.swipeId ?? 0;
-    if (entrySwipeId !== activeSwipeId) return;
+    if (entrySwipeId !== activeSwipeId) return false;
 
     // Skip if overlay already exists for this message
     const existingWrapper = $msg.find(`.${OVERLAY_CLASS}-wrapper[data-wl-tracker-group]`);
-    if (existingWrapper.length > 0) return;
+    if (existingWrapper.length > 0) return false;
 
     const html = buildCombinedOverlay(entry.data);
-    if (!html) return;
+    if (!html) return false;
 
     $msg.find('.mes_text').after(html);
+    return true;
 }
 
 /**
@@ -366,8 +422,7 @@ function renderAllTrackerOverlays() {
 
     let rendered = 0;
     for (const entry of meta.trackerHistory) {
-        renderTrackerOverlay(entry);
-        rendered++;
+        if (renderTrackerOverlay(entry)) rendered++;
     }
 
     if (rendered > 0) {
@@ -590,7 +645,10 @@ ${recentChat}
             .replace(/\{\{user\}\}/gi, userName);
         prompt += `${ctPrompt}
 
-Wrap this tracker's output in [${ct.tag}] and [/${ct.tag}].
+Output format for this tracker — the wrapper tags MUST appear exactly as shown, each on its own line, with the tracker content between them:
+[${ct.tag}]
+(content as specified above)
+[/${ct.tag}]
 
 `;
     }
@@ -729,6 +787,20 @@ function parseUtilityResponse(rawResponse) {
                         if (fm && fm[0].trim()) {
                             parsed[k] = fm[0].trim();
                             log(`parseUtilityResponse: custom tracker '${ct.label}' used truncation fallback`);
+                        } else {
+                            // Fallback 3: mangled opening tag — model merged the tag
+                            // with its first content line, e.g. "[SPARK: 25|Flickering"
+                            // or "[SPARK 25|...". Capture from the tag name (keeping it,
+                            // since the user's content format may start with "TAG:")
+                            // to the next known tag or end-of-string, then normalize
+                            // into a clean [TAG]...[/TAG] wrapper.
+                            const mangledRe = new RegExp(`\\[(${ct.tag}[\\s:|][\\s\\S]*?)(?=\\[(?:${getEffectiveBracketTags().join('|')})[|\\]:]|$)`, 'i');
+                            const mm = rawResponse.match(mangledRe);
+                            if (mm && mm[1] && mm[1].trim()) {
+                                const inner = mm[1].trim().replace(/\]+$/, '').trim();
+                                parsed[k] = `[${ct.tag}]\n${inner}\n[/${ct.tag}]`;
+                                log(`parseUtilityResponse: custom tracker '${ct.label}' recovered mangled opening tag`);
+                            }
                         }
                     }
                 }
@@ -987,12 +1059,9 @@ export async function executeUtilitiesGen() {
     isCancelled = false;
     let success = false;
 
-    const triggerBtn = document.getElementById('wl-trigger-btn');
-    if (triggerBtn) {
-        triggerBtn.classList.add('wl-generating');
-        triggerBtn.dataset.prevTitle = triggerBtn.title;
-        triggerBtn.title = 'Click to cancel tracker generation';
-    }
+    // Show ST's native stop (✕) button so the user can cancel tracker gen,
+    // even with the WL panel pinned open.
+    showStopButtonForGen();
 
     try {
         const settings = getSettings();
@@ -1130,14 +1199,7 @@ export async function executeUtilitiesGen() {
     } finally {
         isGenerating = false;
         isCancelled = false;
-        const triggerBtn = document.getElementById('wl-trigger-btn');
-        if (triggerBtn) {
-            triggerBtn.classList.remove('wl-generating');
-            if (triggerBtn.dataset.prevTitle) {
-                triggerBtn.title = triggerBtn.dataset.prevTitle;
-                delete triggerBtn.dataset.prevTitle;
-            }
-        }
+        hideStopButtonForGen();
     }
 
     return success;
@@ -1193,14 +1255,22 @@ export function initUtilitiesGen(isActiveCheck) {
     });
 
     // After main generation completes
-    eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
+    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
         if (!isActiveCheck()) return;
 
         const settings = getSettings();
 
         if (settings.useSeparateGen) {
-            // Sep-gen mode: run utility gen pipeline (with safety guards inside runUtilitiesGen)
-            await runUtilitiesGen();
+            // Fire-and-forget — do NOT await inside this handler.
+            // ST awaits MESSAGE_RECEIVED listeners, so awaiting here blocks the
+            // rest of the generation pipeline (send button re-enable, chat save)
+            // until tracker gen finishes. saveChatConditional then deadlocks
+            // against the generation lock we're holding open → "Timeout waiting
+            // for chat to save". The guards inside runUtilitiesGen already
+            // handle streaming/agent-run race conditions.
+            setTimeout(() => {
+                runUtilitiesGen().catch(err => logError('Auto utilities gen failed:', err));
+            }, 0);
         }
         // Preset mode: LLM writes tags inline, regex styles them.
         // No reloadCurrentChat needed — ST renders regex on its own.
