@@ -5,8 +5,8 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "Cee & Claude",
+    "author": "mokimoko",
     "version": "0.2.1",
-    "homePage": "https://github.com/nrahis/SillyTavern-WhiteLotus",
+    "homePage": "https://github.com/mokimoko/SillyTavern-WhiteLotus",
     "description": "Companion extension for the White Lotus preset. Provides GUI-based parameter management, toggleable modules, trackers, and lorebook generation utilities."
 }
