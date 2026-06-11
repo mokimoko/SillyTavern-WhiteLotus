@@ -116,6 +116,14 @@ export function applyExclusiveGroup(groupKey, selectedValue) {
             setPromptEnabled(opt.promptId, value === selectedValue);
         }
     }
+
+    // Handle linked toggles — auto-enable/disable toggles based on selection
+    if (group.linkedToggles) {
+        for (const [toggleKey, enableValues] of Object.entries(group.linkedToggles)) {
+            const shouldEnable = enableValues.includes(selectedValue);
+            applyToggle(toggleKey, shouldEnable);
+        }
+    }
 }
 
 /**

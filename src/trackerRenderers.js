@@ -98,9 +98,18 @@ function parseLotus(raw) {
  */
 function parseTemporal(raw) {
     const re = /\[TEMPORAL\|([^|]+)\|([^|]+)\|([^\]]+)\](?:\s*(?:.*?)\s*\[\/TEMPORAL\])?/is;
-    const m = raw.match(re);
+    let m = raw.match(re);
+
     if (!m) {
-        log('parseTemporal: no match');
+        // Lenient fallback: missing closing bracket, or truncated entry
+        // (e.g. old history entries stored before the parser hardened).
+        const loose = /\[TEMPORAL\|([^|\]]+)\|([^|\]]+)\|([^|\]\n]+)/is;
+        m = raw.match(loose);
+        if (m) log('parseTemporal: used lenient fallback');
+    }
+
+    if (!m) {
+        log('parseTemporal: no match — raw:', String(raw).substring(0, 120));
         return null;
     }
     return {

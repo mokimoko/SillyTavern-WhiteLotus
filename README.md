@@ -8,6 +8,8 @@
 
 A companion extension for the *White Lotus preset* for SillyTavern.
 
+`Current Preset Version: White Lotus [4.0.0]`
+
 White Lotus is a preset designed to be modular — use what you want, ignore what you don't. This extension makes it easy to toggle features on and off without digging through the prompt manager. Click the lotus button (top-right corner on desktop) to open a side panel with access to all toggles and settings.
 
 ## Features
