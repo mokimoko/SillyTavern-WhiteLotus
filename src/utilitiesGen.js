@@ -17,9 +17,9 @@ import { getSetting, getSettings } from './settings.js';
 import { findPrompt } from './presetBridge.js';
 import { TRACKERS, TRACKER_KEYS, ALL_BRACKET_TAGS, INFRA } from './moduleRegistry.js';
 import { buildCombinedOverlay, OVERLAY_CLASS } from './trackerRenderers.js';
+import { createLogger } from './debug.js';
 
-const log = (...args) => console.log('[WL Utilities]', ...args);
-const logError = (...args) => console.error('[WL Utilities]', ...args);
+const { log, logWarn, logError } = createLogger('Utilities');
 
 // ============================================================
 // Constants
@@ -563,7 +563,7 @@ function getTrackerPromptContent(settingKey, charName, userName) {
     }
 
     if (!content) {
-        logError(`Preset prompt not found for ${settingKey} (${tracker.promptId}) — skipping tracker`);
+        logWarn(`Preset prompt not found for ${settingKey} (${tracker.promptId}) — skipping tracker`);
         return '';
     }
 

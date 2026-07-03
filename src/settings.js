@@ -8,10 +8,11 @@
 import { extension_settings } from '../../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../../script.js';
 import { buildModuleDefaults } from './moduleRegistry.js';
+import { createLogger } from './debug.js';
 
 export const MODULE_NAME = 'WhiteLotus';
 
-const log = (...args) => console.log('[WhiteLotus]', ...args);
+const { log } = createLogger();
 
 // ============================================================
 // Default Settings
