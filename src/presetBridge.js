@@ -13,8 +13,9 @@ import {
     TOGGLES, EXCLUSIVE_GROUPS, TRACKERS, INFRA,
     TOGGLE_KEYS, TRACKER_KEYS, GROUP_KEYS,
 } from './moduleRegistry.js';
+import { createLogger } from './debug.js';
 
-const log = (...args) => console.log('[WL Bridge]', ...args);
+const { log, logWarn } = createLogger('Bridge');
 
 // ============================================================
 // Prompt Order Access
@@ -63,7 +64,7 @@ export function findPrompt(identifier) {
 export function setPromptEnabled(identifier, enabled) {
     const entry = findOrderEntry(identifier);
     if (!entry) {
-        log(`Prompt not found in order: ${identifier}`);
+        logWarn(`Prompt not found in order: ${identifier}`);
         return false;
     }
     if (entry.enabled === enabled) return false;
@@ -81,7 +82,7 @@ export function setPromptEnabled(identifier, enabled) {
 export function applyToggle(settingKey, enabled) {
     const def = TOGGLES[settingKey];
     if (!def) {
-        log(`No toggle definition for: ${settingKey}`);
+        logWarn(`No toggle definition for: ${settingKey}`);
         return;
     }
     for (const id of def.promptIds) {
@@ -100,7 +101,7 @@ export function applyToggle(settingKey, enabled) {
 export function applyExclusiveGroup(groupKey, selectedValue) {
     const group = EXCLUSIVE_GROUPS[groupKey];
     if (!group) {
-        log(`Unknown exclusive group: ${groupKey}`);
+        logWarn(`Unknown exclusive group: ${groupKey}`);
         return;
     }
 

@@ -37,9 +37,9 @@ import {
 
 // Sampler presets — quick-switch sampler configurations per model
 import { applySamplerPreset, buildSamplerDropdownHTML, getSamplerNote } from './src/samplerPresets.js';
+import { createLogger } from './src/debug.js';
 
-const log = (...args) => console.log('[WhiteLotus]', ...args);
-const logError = (...args) => console.error('[WhiteLotus]', ...args);
+const { log, logError } = createLogger();
 
 // ============================================================
 // Payload Estimation

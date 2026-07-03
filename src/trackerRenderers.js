@@ -7,8 +7,9 @@
 // they never touch msg.mes; they produce ephemeral DOM elements.
 
 import { getSettings } from './settings.js';
+import { createLogger } from './debug.js';
 
-const log = (...args) => console.log('[WL Renderers]', ...args);
+const { log, logWarn } = createLogger('Renderers');
 
 // ============================================================
 // Shared Constants
@@ -325,7 +326,7 @@ function buildCustomOverlay(rawTag, customDef) {
                 return `<div class="${OVERLAY_CLASS}" data-wl-tracker="custom" data-wl-custom-id="${escAttr(customDef.id)}">${replaced}</div>`;
             }
         } catch (e) {
-            log(`Custom tracker regex error (${customDef.label}):`, e.message);
+            logWarn(`Custom tracker regex error (${customDef.label}):`, e.message);
         }
     }
 
