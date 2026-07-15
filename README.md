@@ -27,14 +27,14 @@ White Lotus is a preset designed to be modular — use what you want, ignore wha
 Use SillyTavern's built-in extension installer:
 
 ```
-https://github.com/nrahis/SillyTavern-WhiteLotus
+https://github.com/mokimoko/SillyTavern-WhiteLotus
 ```
 
 Or clone directly into your extensions folder:
 
 ```bash
 cd data/<your-user>/extensions
-git clone https://github.com/nrahis/SillyTavern-WhiteLotus
+git clone https://github.com/mokimoko/SillyTavern-WhiteLotus
 ```
 
 Requires the White Lotus preset to be loaded for most features. The sampler presets work with any preset.
