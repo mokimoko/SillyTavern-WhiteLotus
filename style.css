@@ -7,17 +7,66 @@
 /* UI component CSS (drawer takeovers, chatDesign) moved to UI Bedazzler */
 
 /* ── CSS Variables ─────────────────────────────────────── */
-:root {
-    --wl-bg: rgba(18, 18, 22, 0.95);
-    --wl-bg-section: rgba(0, 0, 0, 0.2);
-    --wl-border: rgba(255, 255, 255, 0.08);
-    --wl-border-hover: rgba(255, 255, 255, 0.15);
-    --wl-text: rgba(207, 203, 197, 1);
-    --wl-text-muted: rgba(207, 203, 197, 0.5);
-    --wl-accent: rgba(151, 167, 198, 1);
-    --wl-accent-dim: rgba(151, 167, 198, 0.4);
-    --wl-toggle-on: rgba(151, 167, 198, 0.85);
-    --wl-toggle-off: rgba(255, 255, 255, 0.1);
+/* THEME-ADAPTIVE (2026-07): colors resolve via color-mix on --SmartTheme*
+ * tokens, so the panel follows BOTH light and dark ST themes. Same approach
+ * as the StoryManager --sm-* layer. Literals that remain are intentional:
+ * var() fallbacks, dark scrims/shadows, and the danger red.
+ *
+ * Scoping: WL's top-level containers are #wl-trigger-btn and #wl-panel
+ * (siblings under <body>). Custom properties inherit to descendants, so the
+ * block is scoped to those two rather than :root — keeps --wl-* out of the
+ * global namespace. NOTE: --wl-panel-width is read by other rules only inside
+ * #wl-panel, so it rides along fine here.
+ *
+ * Identity preserved: the slate-blue accent (151,167,198) tone-adapts via a
+ * body-color mix rather than being dropped for --SmartThemeQuoteColor. */
+#wl-trigger-btn,
+#wl-panel {
+    /* ── Surfaces ────────────────────────────────────────
+       Frosted theme tint over the original near-black fallback. */
+    --wl-bg:         var(--SmartThemeBlurTintColor, rgba(18, 18, 22, 0.95));
+    /* Section header strip — body-color tint, not a fixed black scrim, so it
+       reads as depth on both themes (lift on dark, faint shade on light). */
+    --wl-bg-section: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+    /* Input wells (was rgba(0,0,0,0.25)) */
+    --wl-bg-input:   color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+    /* Select/option surfaces (were opaque rgb(22,22,26) / rgb(18,18,22)).
+       Selects need an OPAQUE background — native dropdown popups don't
+       composite over the panel — so mix against the tint, not transparent. */
+    --wl-bg-select:  color-mix(in srgb, var(--SmartThemeBodyColor) 8%, var(--SmartThemeBlurTintColor, rgb(22, 22, 26)));
+    --wl-bg-optgroup: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, var(--SmartThemeBlurTintColor, rgb(18, 18, 22)));
+
+    /* ── Surface fills (hover washes) ─────────────────── */
+    --wl-fill-hover: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+    --wl-fill-faint: color-mix(in srgb, var(--SmartThemeBodyColor) 3%, transparent);
+
+    /* ── Borders ──────────────────────────────────────── */
+    --wl-border:       color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+    --wl-border-hover: color-mix(in srgb, var(--SmartThemeBodyColor) 15%, transparent);
+    --wl-border-soft:  color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+
+    /* ── Text tiers ───────────────────────────────────── */
+    --wl-text:        color-mix(in srgb, var(--SmartThemeBodyColor) 88%, transparent);
+    --wl-text-strong: var(--SmartThemeBodyColor);
+    --wl-text-muted:  color-mix(in srgb, var(--SmartThemeBodyColor) 50%, transparent);
+    --wl-text-faint:  color-mix(in srgb, var(--SmartThemeBodyColor) 32%, transparent);
+
+    /* ── Accent (slate-blue signature) ────────────────── */
+    --wl-accent-base: color-mix(in srgb, rgb(151, 167, 198) 82%, var(--SmartThemeBodyColor) 18%);
+    --wl-accent:      var(--wl-accent-base);
+    --wl-accent-dim:  color-mix(in srgb, var(--wl-accent-base) 40%, transparent);
+    --wl-toggle-on:   color-mix(in srgb, var(--wl-accent-base) 85%, transparent);
+    --wl-toggle-wash: color-mix(in srgb, var(--wl-accent-base) 15%, transparent);
+    --wl-toggle-off:  color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+
+    /* ── Danger — stays clearly red on both themes ────── */
+    --wl-danger: rgb(255, 118, 117);
+
+    /* ── Dark scrims — intentionally dark on BOTH themes,
+       so the panel reads as floating above the app. ───── */
+    --wl-shadow:     rgba(0, 0, 0, 0.4);
+    --wl-shadow-btn: rgba(0, 0, 0, 0.5);
+
     --wl-panel-width: 300px;
 }
 
@@ -35,15 +84,17 @@
     border-radius: 8px;
     background: var(--wl-bg);
     border: 1px solid var(--wl-border);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 12px var(--wl-shadow-btn);
     cursor: pointer;
-    color: rgba(207, 203, 197, 0.4);
+    color: var(--wl-text-faint);
     transition: background 0.2s ease, border-color 0.2s ease,
                 color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 
 #wl-trigger-btn:hover {
-    background: rgba(30, 30, 36, 0.95);
+    /* was rgba(30,30,36,0.95) — a hand-lightened variant of --wl-bg.
+       Reproduced tone-adaptively: faint body-color wash over the tint. */
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, var(--wl-bg));
     border-color: var(--wl-border-hover);
     color: var(--wl-accent);
     transform: translateY(-1px);
@@ -83,7 +134,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+    box-shadow: -4px 0 20px var(--wl-shadow);
 }
 
 #wl-panel.wl-panel-open {
@@ -142,7 +193,7 @@
     min-width: 160px;
     background: var(--wl-bg);
     border: 1px solid var(--wl-border-hover);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 6px 20px var(--wl-shadow-btn);
     z-index: 100;
     opacity: 0;
     visibility: hidden;
@@ -169,7 +220,7 @@
 }
 
 .wl-panel-menu-item:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--wl-fill-hover);
 }
 
 .wl-panel-menu-item i {
@@ -229,7 +280,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--wl-border-hover);
     flex-shrink: 0;
     transition: background 0.3s ease;
 }
@@ -301,7 +352,7 @@
 .wl-sampler-row {
     padding-bottom: 8px;
     margin-bottom: 4px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--wl-border-soft);
 }
 
 .wl-label {
@@ -324,8 +375,8 @@
     min-width: 0;
     padding: 4px 6px;
     font-size: 0.72em;
-    color: #e0e0e0;
-    background: rgb(22, 22, 26);
+    color: var(--wl-text);
+    background-color: var(--wl-bg-select);
     border: 1px solid var(--wl-border);
     border-radius: 0;
     outline: none;
@@ -333,16 +384,21 @@
     transition: border-color 0.2s ease;
     appearance: none;
     -webkit-appearance: none;
-    /* Custom arrow */
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='rgba(224,224,224,0.5)'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 6px center;
+    /* Custom arrow. Was a data-URI SVG with a baked-in fill — a data URI can't
+       read CSS vars or currentColor, so it stayed light-grey on light themes.
+       Rebuilt as two CSS gradients forming a chevron; they use currentColor,
+       so the arrow now tracks the themed text color for free. */
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 10px center, right 6px center;
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat, no-repeat;
     padding-right: 18px;
 }
 
 .wl-select:hover {
     border-color: var(--wl-border-hover);
-    color: #fff;
+    color: var(--wl-text-strong);
 }
 
 .wl-select:focus {
@@ -355,19 +411,19 @@
 }
 
 .wl-select option {
-    background: rgb(22, 22, 26);
-    color: #e0e0e0;
+    background: var(--wl-bg-select);
+    color: var(--wl-text);
     padding: 2px 6px;
 }
 
 .wl-select option:checked {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    background: var(--wl-fill-hover);
+    color: var(--wl-text-strong);
 }
 
 .wl-select optgroup {
-    background: rgb(18, 18, 22);
-    color: rgba(255, 255, 255, 0.45);
+    background: var(--wl-bg-optgroup);
+    color: var(--wl-text-muted);
     font-style: normal;
     font-size: 0.9em;
     font-weight: 600;
@@ -375,7 +431,7 @@
 }
 
 .wl-select optgroup option {
-    color: #e0e0e0;
+    color: var(--wl-text);
     font-weight: 400;
     padding-left: 8px;
 }
@@ -418,7 +474,7 @@
 }
 
 .wl-toggle input:checked + .wl-toggle-slider {
-    background: rgba(151, 167, 198, 0.15);
+    background: var(--wl-toggle-wash);
     border-color: var(--wl-accent-dim);
 }
 
@@ -649,7 +705,7 @@
 }
 
 .wl-ct-card-header:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--wl-fill-faint);
 }
 
 .wl-ct-chevron {
@@ -709,7 +765,7 @@
 
 .wl-ct-input {
     width: 100%;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--wl-bg-input);
     border: 1px solid var(--wl-border);
     color: var(--wl-text);
     padding: 3px 5px;
@@ -745,5 +801,5 @@
 }
 
 .wl-ct-delete:hover {
-    color: #ff7675;
+    color: var(--wl-danger);
 }
