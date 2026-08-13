@@ -292,6 +292,7 @@ const BUILDERS = {
  */
 function buildCustomOverlay(rawTag, customDef) {
     const tag = customDef.tag;
+    const escapedTag = escapeRegExp(tag);
 
     // Strip wrapper tags. Models often collapse content into a pipe-tag style
     // [TAG|content][/TAG] instead of the requested [TAG]content[/TAG] because
@@ -301,18 +302,18 @@ function buildCustomOverlay(rawTag, customDef) {
     let inner = rawTag;
 
     // Try bracket-style wrapper first: [TAG]content[/TAG]
-    let wrapMatch = rawTag.match(new RegExp(`\\[${tag}\\]([\\s\\S]*?)\\[/${tag}\\]`, 'i'));
+    let wrapMatch = rawTag.match(new RegExp(`\\[${escapedTag}\\]([\\s\\S]*?)\\[/${escapedTag}\\]`, 'i'));
 
     // Fall back to pipe-style wrapper: [TAG|content][/TAG] (model variant)
     if (!wrapMatch) {
-        wrapMatch = rawTag.match(new RegExp(`\\[${tag}\\|([\\s\\S]*?)\\]\\s*\\[/${tag}\\]`, 'i'));
+        wrapMatch = rawTag.match(new RegExp(`\\[${escapedTag}\\|([\\s\\S]*?)\\]\\s*\\[/${escapedTag}\\]`, 'i'));
     }
 
     if (wrapMatch) {
         inner = wrapMatch[1].trim();
     } else {
         // Final fallback: strip just an opening tag of either shape
-        inner = rawTag.replace(new RegExp(`^\\[${tag}(?:\\|[^\\]]*)?\\]\\s*`, 'i'), '').trim();
+        inner = rawTag.replace(new RegExp(`^\\[${escapedTag}(?:\\|[^\\]]*)?\\]\\s*`, 'i'), '').trim();
     }
 
     if (!inner) return null;
@@ -323,7 +324,8 @@ function buildCustomOverlay(rawTag, customDef) {
             const findRe = new RegExp(customDef.regexFind, 'gi');
             const replaced = inner.replace(findRe, customDef.regexReplace || '');
             if (replaced && replaced !== inner) {
-                return `<div class="${OVERLAY_CLASS}" data-wl-tracker="custom" data-wl-custom-id="${escAttr(customDef.id)}">${replaced}</div>`;
+                const safeHtml = sanitizeCustomTrackerHtml(replaced);
+                return `<div class="${OVERLAY_CLASS}" data-wl-tracker="custom" data-wl-custom-id="${escAttr(customDef.id)}">${safeHtml}</div>`;
             }
         } catch (e) {
             logWarn(`Custom tracker regex error (${customDef.label}):`, e.message);
@@ -371,9 +373,16 @@ export function buildTrackerOverlay(trackerKey, rawTag) {
  */
 export function buildCombinedOverlay(trackerData) {
     const parts = [];
+    const settings = getSettings();
 
     for (const [key, rawTag] of Object.entries(trackerData)) {
         if (!rawTag) continue;
+        if (BUILDERS[key] && !settings[key]) continue;
+        if (key.startsWith('custom_')) {
+            const customId = key.slice(7);
+            const enabled = (settings.customTrackers || []).some(ct => ct.id === customId && ct.enabled);
+            if (!enabled) continue;
+        }
         const html = buildTrackerOverlay(key, rawTag);
         if (html) parts.push(html);
     }
@@ -408,6 +417,38 @@ function escHtml(str) {
 /** Escape for use in HTML attribute values */
 function escAttr(str) {
     return escHtml(str).replace(/'/g, '&#39;');
+}
+
+/** Escape text before interpolating it into a regular expression. */
+function escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Sanitize custom replacement HTML before it reaches the chat DOM. */
+function sanitizeCustomTrackerHtml(html) {
+    if (globalThis.DOMPurify?.sanitize) {
+        return globalThis.DOMPurify.sanitize(html, {
+            FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+        });
+    }
+
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    template.content.querySelectorAll('script, style, iframe, object, embed').forEach(node => node.remove());
+    template.content.querySelectorAll('*').forEach(node => {
+        for (const attribute of [...node.attributes]) {
+            const name = attribute.name.toLowerCase();
+            const value = attribute.value.trim();
+            if (name.startsWith('on')) node.removeAttribute(attribute.name);
+            if (name === 'style' && /(?:url\s*\(|expression\s*\(|@import|-moz-binding)/i.test(value)) {
+                node.removeAttribute(attribute.name);
+            }
+            if ((name === 'href' || name === 'src') && !/^(?:https?:|\/|#|data:image\/)/i.test(value)) {
+                node.removeAttribute(attribute.name);
+            }
+        }
+    });
+    return template.innerHTML;
 }
 
 /** Capitalize first letter */

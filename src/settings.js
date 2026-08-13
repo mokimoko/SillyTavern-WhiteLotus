@@ -20,21 +20,31 @@ const { log } = createLogger();
 
 /** Infrastructure defaults — settings NOT managed by the module registry */
 const INFRA_DEFAULTS = {
-    // --- Variable setter params (content-swapped, not toggles) ---
-    tense: 'past',           // past | present
-    pov: '3rd',              // 1st | 2nd | 3rd
+    // NOTE: tense & pov defaults now come from the module registry
+    // (EXCLUSIVE_GROUPS) via buildModuleDefaults(), since preset 4.2.0 turned
+    // them into normal exclusive groups.
 
     // --- Sampler ---
     samplerPreset: '',       // key from SAMPLER_PRESETS (empty = none selected)
 
+    // --- Panel ---
+    // The selected companion view persists when an unrelated ST preset is active.
+    panelMode: 'white-lotus',
+
     // --- Utilities Settings ---
     useSeparateGen: false,
     utilityScanDepth: 2,
-    utilityAutoRun: 'every',
+    utilityAutoRun: 'manual',
     utilityAutoRunInterval: 3,
     utilityConnectionProfile: '',
     utilityMaxTokens: 2000,
     utilityTemperature: 0.7,
+
+    // --- Plum Blossom ---
+    // Kept off by default so the preset remains standalone-first.
+    plumBlossomSeparateAnalysis: false,
+    plumBlossomAnalysisAutoRun: 'manual',
+    plumBlossomAnalysisAutoRunInterval: 3,
 
     // --- Custom Trackers ---
     customTrackers: [],  // Array of { id, label, tag, prompt, regexFind, regexReplace, multiEntry, enabled }

@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "mokimoko",
-    "version": "0.2.1",
+    "version": "0.5.6",
     "homePage": "https://github.com/mokimoko/SillyTavern-WhiteLotus",
-    "description": "Companion extension for the White Lotus preset. Provides GUI-based parameter management, toggleable modules, trackers, and lorebook generation utilities."
+    "description": "Companion extension for White Lotus and Plum Blossom presets, with preset controls, trackers, separate scene analysis, and a state Inspector with rebuild and cleanup tools."
 }

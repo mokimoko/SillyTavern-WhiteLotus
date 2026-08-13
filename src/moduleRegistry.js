@@ -17,6 +17,18 @@ export const TOGGLES = {
     // --- Main Prompt ---
     mainLotusEngine:     { category: 'Main', label: 'Lotus Engine',      settingDefault: true, promptIds: ['72e0c614-9eb5-4353-b490-efbc5312f4a2'] },
     mainUserAutonomy:    { category: 'Main', label: 'User Autonomy',     settingDefault: true, promptIds: ['4f6996e5-b902-45c2-9b8a-6255df7d715a'] },
+    mainAisTurn:         { category: 'Main', label: "AI's Turn",         settingDefault: true, promptIds: ['0f0e4d5d-ec5e-42ee-97c6-107670eff9f4'] },
+
+    // --- Main Prompt: SillyTavern default blocks (preset 4.2.1) ---
+    // The White Lotus preset now keeps ST's built-in prompt blocks separate
+    // from its own. These expose the safe-to-toggle defaults; structural blocks
+    // (char info, chat history, lore, persona, scenario, examples) are left out
+    // deliberately so they can't be disabled by accident. All default OFF to
+    // match their state in the shipped preset.
+    stMainPrompt:         { category: 'Main', label: 'ST: Main Prompt',          settingDefault: false, promptIds: ['main'] },
+    stEnhanceDefinitions: { category: 'Main', label: 'ST: Enhance Definitions',  settingDefault: false, promptIds: ['enhanceDefinitions'] },
+    stAuxiliaryPrompt:    { category: 'Main', label: 'ST: Auxiliary Prompt',     settingDefault: false, promptIds: ['nsfw'] },
+    stJailbreak:          { category: 'Main', label: 'ST: Post-History',         settingDefault: false, promptIds: ['jailbreak'] },
 
     // --- Tweaks ---
     tweakNPCs:          { category: 'Tweaks', label: 'Better NPCs',      settingDefault: false, promptIds: ['aae6f802-1860-46e1-9d0a-4f30859adc18'] },
@@ -51,6 +63,30 @@ export const TOGGLES = {
 // ============================================================
 
 export const EXCLUSIVE_GROUPS = {
+    // Tense & POV — as of preset 4.2.0 these are normal exclusive groups
+    // (each option is its own prompt that sets promptTense / promptPOV via
+    // {{setvar}}), replacing the old single content-swapped "Set Variables"
+    // prompt. Option values are the UI keys; the preset prompts hold the
+    // human-readable variable content consumed by {{getvar::promptPOV}} etc.
+    tense: {
+        category: 'Parameters',
+        label: 'Tense',
+        settingDefault: 'past',
+        options: {
+            past:    { label: 'Past',    promptId: 'b3507a5d-becb-45a4-a69a-4c4f3fff8624' },
+            present: { label: 'Present', promptId: 'e058cedd-d2fc-42c5-90dc-2d812607af22' },
+        },
+    },
+    pov: {
+        category: 'Parameters',
+        label: 'POV',
+        settingDefault: '3rd_you',
+        options: {
+            '1st':     { label: '1st Person',           promptId: '2fafcd42-1422-4f1b-85e6-f9403c8d2d3c' },
+            '3rd':     { label: '3rd Person',           promptId: 'e130e259-3002-457c-8cdd-defc0761f907' },
+            '3rd_you': { label: '3rd Person (uses "you")', promptId: '4c07346d-b997-4e39-84d3-5a680e681f78' },
+        },
+    },
     length: {
         category: 'Parameters',
         label: 'Length',
@@ -112,7 +148,9 @@ export const EXCLUSIVE_GROUPS = {
         category: 'NSFW',
         label: 'Style',
         settingDefault: null,
-        masterToggleId: 'nsfw',
+        // Preset 4.2.1 split ST's default 'nsfw' block out (now "Auxiliary
+        // Prompt"); the actual NSFW master content moved to this new block.
+        masterToggleId: '2174cd63-4ccc-4069-870e-f304f2583a37',
         options: {
             '':              { label: 'Off' },
             realistic:       { label: 'Realistic',       promptId: '63638103-d121-4958-88f4-7948128b5400' },
@@ -164,15 +202,22 @@ export const TRACKERS = {
 // ============================================================
 
 export const INFRA = {
-    /** Variable setter prompt — content-swapped at generation time for tense/POV */
-    variableSetterId: 'cb7a858f-2105-434e-ba11-a073485b2bb2',
+    // NOTE: The old content-swapped "Set Variables" prompt (cb7a858f-…) was
+    // removed in preset 4.2.0. Tense/POV are now exclusive groups (see above),
+    // so there is no variableSetterId anymore.
 
     /** Shared format rules for all trackers — auto-managed dependency */
     trackerFormatRulesId: '5e4646fc-4225-4c0b-a0e6-8981e08b7f1f',
 
-    /** Signature IDs for preset detection (fallback when name doesn't match) */
+    /**
+     * Signature IDs for CURRENT-version preset detection.
+     * These IDs must all be present in the active prompt order for the preset
+     * to be considered the current bundled White Lotus. If only SOME WL prompt
+     * IDs are present (see collectAllPromptIds), the preset is an older WL
+     * version — detected as "outdated" so the panel can prompt an update.
+     */
     signatureIds: [
-        'cb7a858f-2105-434e-ba11-a073485b2bb2',  // Set Variables
+        '414477ab-e91a-4851-8f30-c98eb2e98a33',  // Tense group header (4.2.0+)
         '8f1944bb-7f94-4e1a-ae23-1a8c20261ba0',  // Flexible length
         '05233b1e-de2c-430a-8a97-13284c37dae5',  // Anti-Slop
         '7ff54f24-9031-4d44-96bf-6a59d1d144af',  // NPC Crafter
@@ -194,10 +239,8 @@ export const UI_SECTIONS = [
         id: 'parameters',
         label: 'Parameters',
         type: 'mixed',
-        // tense + pov are variable-setter params, not registry modules — hand-coded prefix
-        prefix: `__SELECT:tense:Tense:past=Past,present=Present__
-__SELECT:pov:POV:1st=1st Person,2nd=2nd Person,3rd=3rd Person__`,
-        groups: ['length', 'narratorType', 'diction', 'genre'],
+        // tense + pov are now normal exclusive groups (preset 4.2.0+)
+        groups: ['tense', 'pov', 'length', 'narratorType', 'diction', 'genre'],
         toggles: [],
     },
     {
@@ -287,7 +330,6 @@ export function buildCategoryMap() {
     }
 
     // Infrastructure
-    map[INFRA.variableSetterId] = 'Parameters';
     if (INFRA.trackerFormatRulesId) map[INFRA.trackerFormatRulesId] = 'Trackers';
 
     return map;
@@ -344,4 +386,71 @@ export function getGroupOptions(groupKey) {
         opts[value] = opt.label;
     }
     return opts;
+}
+
+// ============================================================
+// Preset detection — signature-based
+//
+// The extension now ships its own preset, so detection no longer relies on the
+// preset name. Instead we look at which known White Lotus prompt IDs appear in
+// the active prompt order:
+//   - ALL current signature IDs present  → current WL (full support)
+//   - SOME WL prompt IDs present, but a signature ID missing → outdated WL
+//   - no WL prompt IDs present           → not a WL preset
+// ============================================================
+
+/**
+ * Collect every prompt ID this registry knows about (toggles, group options,
+ * master toggles, trackers, infra). Used to recognise older WL presets whose
+ * signature IDs may have changed but which still share many prompt IDs.
+ * @returns {Set<string>}
+ */
+export function collectAllPromptIds() {
+    const ids = new Set();
+
+    for (const def of Object.values(TOGGLES)) {
+        for (const id of def.promptIds) ids.add(id);
+    }
+    for (const group of Object.values(EXCLUSIVE_GROUPS)) {
+        for (const opt of Object.values(group.options)) {
+            if (opt.promptId) ids.add(opt.promptId);
+        }
+        if (group.masterToggleId) ids.add(group.masterToggleId);
+    }
+    for (const tracker of Object.values(TRACKERS)) {
+        ids.add(tracker.promptId);
+    }
+    if (INFRA.trackerFormatRulesId) ids.add(INFRA.trackerFormatRulesId);
+    for (const id of INFRA.signatureIds) ids.add(id);
+
+    return ids;
+}
+
+/**
+ * Classify the active prompt order.
+ * @param {Array<{identifier:string}>} order - active prompt_order entries
+ * @returns {{ state: 'current'|'outdated'|'none', matched: number, total: number }}
+ *   state   — 'current' (all signature IDs present), 'outdated' (some WL IDs
+ *             but not a full signature match), or 'none' (no WL IDs at all)
+ *   matched — how many current signature IDs were found
+ *   total   — number of current signature IDs
+ */
+export function classifyPromptOrder(order) {
+    const total = INFRA.signatureIds.length;
+    if (!Array.isArray(order) || order.length === 0) {
+        return { state: 'none', matched: 0, total };
+    }
+
+    const present = new Set(order.map(e => e && e.identifier).filter(Boolean));
+
+    let matched = 0;
+    for (const sigId of INFRA.signatureIds) {
+        if (present.has(sigId)) matched++;
+    }
+    // Binary: a full signature match is current WL; anything else (foreign
+    // preset OR an older WL version) is treated as not WL.
+    if (matched === total) {
+        return { state: 'current', matched, total };
+    }
+    return { state: 'none', matched, total };
 }
