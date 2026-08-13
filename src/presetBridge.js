@@ -176,44 +176,20 @@ function syncTrackerFormatRules() {
 }
 
 // ============================================================
-// Variable Setter — Content Swapping with Save/Restore
+// Apply
+//
+// As of preset 4.2.0, tense & POV are ordinary exclusive groups (each option
+// is its own {{setvar}} prompt), so they flow through applyExclusiveGroup with
+// every other group — no content-swapping or save/restore is needed anymore.
 // ============================================================
-
-/** Saved original content for restoration */
-const savedContent = new Map();
-
-/**
- * Build the variable setter content string from current settings.
- */
-export function buildVariableSetterContent(settings) {
-    const lines = [
-        '{{trim}}',
-        `{{setvar::promptTense::${settings.tense || 'past'}}}{{trim}}`,
-        `{{setvar::promptPOV::${settings.pov || '3rd'}}}{{trim}}`,
-    ];
-    return lines.join('\n');
-}
 
 /**
  * Apply all current settings to the preset prompts.
- * Called at GENERATION_AFTER_COMMANDS — modifies prompts, saves originals for restore.
+ * Called at GENERATION_AFTER_COMMANDS.
  *
  * @param {object} settings - Current extension settings (or per-character merged)
  */
 export function applyAllSettings(settings) {
-    // Safety: restore any leftovers from a crashed previous gen
-    if (savedContent.size) {
-        log('Found leftover saved content — restoring before new apply');
-        restoreAllSettings();
-    }
-
-    // --- Variable setter (tense, POV) ---
-    const setterPrompt = findPrompt(INFRA.variableSetterId);
-    if (setterPrompt) {
-        savedContent.set(INFRA.variableSetterId, setterPrompt.content);
-        setterPrompt.content = buildVariableSetterContent(settings);
-    }
-
     // --- Simple toggles (tweaks, fixes, tools) ---
     for (const key of TOGGLE_KEYS) {
         applyToggle(key, !!settings[key]);
@@ -230,26 +206,6 @@ export function applyAllSettings(settings) {
     }
 
     log('Applied all settings to preset');
-}
-
-/**
- * Restore all modified prompts to their original state.
- * Called at GENERATION_ENDED / GENERATION_STOPPED.
- */
-export function restoreAllSettings() {
-    if (!savedContent.size) return;
-
-    let restored = 0;
-    for (const [identifier, content] of savedContent) {
-        const prompt = findPrompt(identifier);
-        if (prompt) {
-            prompt.content = content;
-            restored++;
-        }
-    }
-
-    savedContent.clear();
-    if (restored > 0) log(`Restored ${restored} prompt(s)`);
 }
 
 // ============================================================
@@ -297,14 +253,7 @@ export function readPresetState() {
         }
     }
 
-    // Read variable setter for tense/POV
-    const setterPrompt = findPrompt(INFRA.variableSetterId);
-    if (setterPrompt?.content) {
-        const tenseMatch = setterPrompt.content.match(/setvar::promptTense::(\w+)/);
-        const povMatch = setterPrompt.content.match(/setvar::promptPOV::(\w+)/);
-        if (tenseMatch) state.tense = tenseMatch[1];
-        if (povMatch) state.pov = povMatch[1];
-    }
+    // tense & POV are exclusive groups now — already read by the loop above.
 
     return state;
 }
@@ -323,14 +272,6 @@ export function initGenerationHooks(getActiveSettings) {
         if (settings) {
             applyAllSettings(settings);
         }
-    });
-
-    eventSource.on(event_types.GENERATION_ENDED, () => {
-        restoreAllSettings();
-    });
-
-    eventSource.on(event_types.GENERATION_STOPPED, () => {
-        restoreAllSettings();
     });
 
     log('Generation hooks initialized');

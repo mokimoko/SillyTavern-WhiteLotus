@@ -10,7 +10,10 @@
 // All tracker definitions (tags, fallbacks, multiEntry) come from moduleRegistry.js.
 // Overlay HTML builders live in trackerRenderers.js.
 
-import { eventSource, event_types, chat, chat_metadata, saveChatConditional, generateRaw, getCharacterCardFields } from '../../../../../script.js';
+import {
+    eventSource, event_types, chat, chat_metadata, saveChatConditional,
+    generateRaw, getCharacterCardFields,
+} from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 import { ConnectionManagerRequestService } from '../../../../extensions/shared.js';
 import { getSetting, getSettings } from './settings.js';
@@ -18,6 +21,7 @@ import { findPrompt } from './presetBridge.js';
 import { TRACKERS, TRACKER_KEYS, ALL_BRACKET_TAGS, INFRA } from './moduleRegistry.js';
 import { buildCombinedOverlay, OVERLAY_CLASS } from './trackerRenderers.js';
 import { createLogger } from './debug.js';
+import { acquireGenerationLock } from './generationLock.js';
 
 const { log, logWarn, logError } = createLogger('Utilities');
 
@@ -27,61 +31,6 @@ const { log, logWarn, logError } = createLogger('Utilities');
 
 /** Legacy HTML comment markers — kept for cleaning old messages only */
 const TRACKER_BLOCK_RE = /<!--WL_TRACKER_START-->[\s\S]*?<!--WL_TRACKER_END-->/g;
-
-// ============================================================
-// Stop Button Integration (native ST #mes_stop)
-// ============================================================
-//
-// During separate tracker gen the main generation is already finished, so
-// ST's stop button is hidden. We reuse it to cancel tracker gen: show it on
-// start, hide it on finish. A capture-phase listener intercepts the click and
-// routes it to cancelUtilitiesGen() before ST's own (no-op) stopGeneration().
-
-/** Saved value of body[data-generating] so we can restore it after tracker gen. */
-let prevGeneratingAttr = null;
-
-/** Capture-phase click handler — cancels tracker gen when the stop button is hit. */
-function onStopButtonClick(e) {
-    if (!isGenerating) return;
-    // Only react to the stop button itself
-    if (!e.target.closest('#mes_stop, .mes_stop')) return;
-    cancelUtilitiesGen();
-    // Don't preventDefault — ST's stopGeneration() is a harmless no-op here.
-}
-
-/** Show ST's native stop button and arm our cancel listener. */
-function showStopButtonForGen() {
-    const stop = document.getElementById('mes_stop');
-    if (stop) stop.style.display = 'flex';
-    // Mirror ST's generating state so the send button (and friends) hide.
-    // Save the prior value so we can restore it without clobbering a real gen.
-    if (typeof document !== 'undefined' && document.body) {
-        prevGeneratingAttr = document.body.getAttribute('data-generating');
-        document.body.setAttribute('data-generating', 'true');
-    }
-    // Capture phase so we run before ST's delegated bubble-phase handler.
-    document.addEventListener('click', onStopButtonClick, true);
-}
-
-/** Hide the stop button and disarm our listener (unless main gen still owns it). */
-function hideStopButtonForGen() {
-    document.removeEventListener('click', onStopButtonClick, true);
-    const stop = document.getElementById('mes_stop');
-    // Only hide if a real generation isn't in progress (don't steal it from main gen).
-    const streamingProcessor = typeof window !== 'undefined' ? window?.SillyTavern?.streamingProcessor : null;
-    const mainGenActive = streamingProcessor && !streamingProcessor.isFinished;
-    if (stop && !mainGenActive) stop.style.display = 'none';
-    // Restore the generating attribute to whatever it was before we ran,
-    // unless a real gen took over in the meantime.
-    if (typeof document !== 'undefined' && document.body && !mainGenActive) {
-        if (prevGeneratingAttr === null) {
-            document.body.removeAttribute('data-generating');
-        } else {
-            document.body.setAttribute('data-generating', prevGeneratingAttr);
-        }
-    }
-    prevGeneratingAttr = null;
-}
 
 // ============================================================
 // Custom Tracker Helpers
@@ -107,6 +56,17 @@ function getAllCustomTrackers() {
 /** Setting key for a custom tracker: 'custom_{id}' */
 function customKey(ct) {
     return `custom_${ct.id}`;
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getEffectiveBracketTagPattern(excludedTag = null) {
+    return getEffectiveBracketTags()
+        .filter(tag => tag !== excludedTag)
+        .map(escapeRegExp)
+        .join('|');
 }
 
 /**
@@ -174,6 +134,11 @@ let isCancelled = false;
  *  then included in the utility gen prompt for tracker context. */
 let cachedWorldInfo = [];
 
+/** Debounce handles for ephemeral overlay rendering during chat hydration. */
+let fullOverlayRenderTimer = null;
+let incrementalOverlayRenderTimer = null;
+const pendingOverlayMessageIds = new Set();
+
 // ============================================================
 // Public API
 // ============================================================
@@ -189,10 +154,12 @@ export function getLatestTrackerState() {
  * Reset tracker state (e.g. on chat change).
  */
 export function resetTrackerState() {
+    cancelScheduledOverlayRenders();
     latestTrackerState = Object.fromEntries(getEffectiveKeys().map(k => [k, null]));
     cachedWorldInfo = [];
     messagesSinceLastGen = 0;
     isGenerating = false;
+    isCancelled = false;
 
     // Load latest state from chat_metadata if available
     loadTrackerStateFromMetadata();
@@ -237,6 +204,38 @@ function getMetadata() {
 }
 
 /**
+ * Reconstruct a complete state snapshot from swipe-valid history entries.
+ * Older versions stored partial entries, so unresolved keys keep walking
+ * backward until a value (including an explicit null) is found.
+ */
+function getAccumulatedTrackerState(beforeMessageIndex = Infinity) {
+    const keys = getEffectiveKeys();
+    const state = Object.fromEntries(keys.map(key => [key, null]));
+    const unresolved = new Set(keys);
+    const meta = getMetadata();
+    if (!meta || meta.trackerHistory.length === 0) return state;
+
+    const chatLog = getContext().chat;
+    const candidates = meta.trackerHistory
+        .filter(entry => entry.messageIndex < beforeMessageIndex)
+        .sort((a, b) => (b.messageIndex - a.messageIndex) || ((b.timestamp || 0) - (a.timestamp || 0)));
+
+    for (const entry of candidates) {
+        const activeSwipeId = chatLog?.[entry.messageIndex]?.swipe_id ?? 0;
+        if ((entry.swipeId ?? 0) !== activeSwipeId || !entry.data) continue;
+
+        for (const key of [...unresolved]) {
+            if (!Object.prototype.hasOwnProperty.call(entry.data, key)) continue;
+            state[key] = entry.data[key] || null;
+            unresolved.delete(key);
+        }
+        if (unresolved.size === 0) break;
+    }
+
+    return state;
+}
+
+/**
  * Load latestTrackerState from chat_metadata on chat change.
  * Finds the most recent history entry whose swipeId matches the message's
  * currently active swipe, so we don't load stale data from an inactive swipe.
@@ -245,26 +244,11 @@ function loadTrackerStateFromMetadata() {
     const meta = getMetadata();
     if (!meta || meta.trackerHistory.length === 0) return;
 
-    const context = getContext();
-    const chatLog = context.chat;
-
-    // Walk backwards to find the most recent entry matching the active swipe
-    for (let i = meta.trackerHistory.length - 1; i >= 0; i--) {
-        const entry = meta.trackerHistory[i];
-        const msg = chatLog?.[entry.messageIndex];
-        const activeSwipeId = msg?.swipe_id ?? 0;
-        const entrySwipeId = entry.swipeId ?? 0;
-
-        if (entrySwipeId === activeSwipeId && entry.data) {
-            for (const key of getEffectiveKeys()) {
-                if (entry.data[key]) {
-                    latestTrackerState[key] = entry.data[key];
-                }
-            }
-            log(`Loaded tracker state from metadata (message ${entry.messageIndex}, swipe ${entrySwipeId})`);
-            return;
-        }
+    const accumulated = getAccumulatedTrackerState();
+    for (const key of getEffectiveKeys()) {
+        latestTrackerState[key] = accumulated[key] || null;
     }
+    log('Loaded accumulated tracker state from metadata');
 }
 
 /**
@@ -273,11 +257,11 @@ function loadTrackerStateFromMetadata() {
  *
  * @param {object} parsed - Parsed tracker data keyed by setting key
  */
-async function storeTrackerResult(parsed) {
+async function storeTrackerResult(parsed, { persist = true } = {}) {
     const meta = getMetadata();
     if (!meta) {
         logError('storeTrackerResult: chat_metadata not available');
-        return;
+        return null;
     }
 
     // Find the last assistant message index
@@ -295,22 +279,22 @@ async function storeTrackerResult(parsed) {
 
     if (messageIndex < 0) {
         log('storeTrackerResult: no assistant message found');
-        return;
+        return null;
     }
 
     // Get the active swipe_id for this message
     const swipeId = chatLog[messageIndex]?.swipe_id ?? 0;
 
-    // Build data object (only non-null entries)
-    const data = {};
-    for (const key of getEffectiveKeys()) {
-        if (parsed[key]) data[key] = parsed[key];
+    if (!parsed || !Object.values(parsed).some(Boolean)) {
+        log('storeTrackerResult: no parsed data to store');
+        return null;
     }
 
-    if (Object.keys(data).length === 0) {
-        log('storeTrackerResult: no data to store');
-        return;
-    }
+    // Store a complete snapshot. latestTrackerState already includes carried
+    // forward values for trackers omitted from this parsed response.
+    const data = Object.fromEntries(
+        getEffectiveKeys().map(key => [key, latestTrackerState[key] || null]),
+    );
 
     // Replace existing entry for this messageIndex+swipeId (don't accumulate across swipes)
     meta.trackerHistory = meta.trackerHistory.filter(
@@ -331,13 +315,17 @@ async function storeTrackerResult(parsed) {
         meta.trackerHistory = meta.trackerHistory.slice(-50);
     }
 
-    // Save metadata via ST's native persistence
-    try {
-        await saveChatConditional();
-        log(`Stored tracker data for message ${messageIndex} swipe ${swipeId} (${Object.keys(data).length} trackers, history size: ${meta.trackerHistory.length})`);
-    } catch (err) {
-        logError('Failed to save chat metadata:', err);
+    // Automatic runs are inside MESSAGE_RECEIVED; ST saves after the event.
+    // Manual runs have no enclosing save and persist explicitly here.
+    if (persist) {
+        try {
+            await saveChatConditional();
+        } catch (err) {
+            logError('Failed to save chat metadata:', err);
+        }
     }
+    log(`Stored tracker data for message ${messageIndex} swipe ${swipeId} (${Object.keys(data).length} trackers, history size: ${meta.trackerHistory.length})`);
+    return entry;
 }
 
 // ============================================================
@@ -354,26 +342,7 @@ async function storeTrackerResult(parsed) {
  * @returns {object} Tracker data keyed by setting key, or empty object
  */
 function getStateBeforeMessage(targetMessageIndex) {
-    const meta = getMetadata();
-    if (!meta || meta.trackerHistory.length === 0) return {};
-
-    const context = getContext();
-    const chatLog = context.chat;
-
-    for (let i = meta.trackerHistory.length - 1; i >= 0; i--) {
-        const entry = meta.trackerHistory[i];
-        if (entry.messageIndex >= targetMessageIndex) continue;
-
-        // Verify this entry matches the currently active swipe for its message
-        const msg = chatLog?.[entry.messageIndex];
-        const activeSwipeId = msg?.swipe_id ?? 0;
-        const entrySwipeId = entry.swipeId ?? 0;
-
-        if (entrySwipeId === activeSwipeId) {
-            return entry.data || {};
-        }
-    }
-    return {};
+    return getAccumulatedTrackerState(targetMessageIndex);
 }
 
 // ============================================================
@@ -414,11 +383,14 @@ function renderTrackerOverlay(entry) {
  * Called on CHAT_CHANGED / MESSAGE_RENDERED to rebuild ephemeral DOM elements.
  */
 function renderAllTrackerOverlays() {
+    clearAllOverlays();
+    renderMissingTrackerOverlays();
+}
+
+/** Render only overlays that are not already present in the current DOM. */
+function renderMissingTrackerOverlays() {
     const meta = getMetadata();
     if (!meta || meta.trackerHistory.length === 0) return;
-
-    // Clean existing overlays first
-    clearAllOverlays();
 
     let rendered = 0;
     for (const entry of meta.trackerHistory) {
@@ -435,6 +407,49 @@ function renderAllTrackerOverlays() {
  */
 function clearAllOverlays() {
     $(`.${OVERLAY_CLASS}-wrapper[data-wl-tracker-group]`).remove();
+}
+
+function renderTrackerOverlayForMessage(messageIndex) {
+    const numericId = Number(messageIndex);
+    if (!Number.isInteger(numericId)) return false;
+
+    const meta = getMetadata();
+    const activeSwipeId = getContext().chat?.[numericId]?.swipe_id ?? 0;
+    const entry = meta?.trackerHistory.find(
+        item => item.messageIndex === numericId && (item.swipeId ?? 0) === activeSwipeId,
+    );
+    return entry ? renderTrackerOverlay(entry) : false;
+}
+
+function cancelScheduledOverlayRenders() {
+    if (fullOverlayRenderTimer !== null) clearTimeout(fullOverlayRenderTimer);
+    if (incrementalOverlayRenderTimer !== null) clearTimeout(incrementalOverlayRenderTimer);
+    fullOverlayRenderTimer = null;
+    incrementalOverlayRenderTimer = null;
+    pendingOverlayMessageIds.clear();
+}
+
+function scheduleFullOverlayRender(isActiveCheck, delay = 200) {
+    cancelScheduledOverlayRenders();
+    fullOverlayRenderTimer = setTimeout(() => {
+        fullOverlayRenderTimer = null;
+        if (isActiveCheck()) renderAllTrackerOverlays();
+    }, delay);
+}
+
+function scheduleMessageOverlayRender(messageIndex, isActiveCheck, delay = 0) {
+    if (fullOverlayRenderTimer !== null) return;
+    const numericId = Number(messageIndex);
+    if (!Number.isInteger(numericId)) return;
+    pendingOverlayMessageIds.add(numericId);
+    if (incrementalOverlayRenderTimer !== null) return;
+    incrementalOverlayRenderTimer = setTimeout(() => {
+        incrementalOverlayRenderTimer = null;
+        const messageIds = [...pendingOverlayMessageIds];
+        pendingOverlayMessageIds.clear();
+        if (!isActiveCheck()) return;
+        for (const id of messageIds) renderTrackerOverlayForMessage(id);
+    }, delay);
 }
 
 // ============================================================
@@ -688,14 +703,15 @@ No other text. No narrative. No explanation. Begin:`;
  * @returns {string|null} Full tagged block, or null if not found
  */
 function extractSection(text, tag) {
+    const escapedTag = escapeRegExp(tag);
     // Strict match: opening tag through closing tag
-    const re = new RegExp(`\\[${tag}[|\\]][\\s\\S]*?\\[/${tag}\\]`, 'i');
+    const re = new RegExp(`\\[${escapedTag}[|\\]][\\s\\S]*?\\[/${escapedTag}\\]`, 'i');
     const match = text.match(re);
     if (match) return match[0].trim();
 
     // Fallback for truncated responses
-    const allTags = getEffectiveBracketTags().join('|');
-    const fallbackRe = new RegExp(`\\[${tag}[|\\]][\\s\\S]*?(?=\\[(?:${allTags})[|\\]]|$)`, 'i');
+    const allTags = getEffectiveBracketTagPattern();
+    const fallbackRe = new RegExp(`\\[${escapedTag}[|\\]][\\s\\S]*?(?=\\[(?:${allTags})[|\\]]|$)`, 'i');
     const fallbackMatch = text.match(fallbackRe);
     if (fallbackMatch && fallbackMatch[0].trim()) {
         log(`extractSection('${tag}'): used truncation fallback — response may have hit token limit`);
@@ -713,13 +729,14 @@ function extractSection(text, tag) {
  * @returns {string[]|null} Array of full block strings, or null if none found
  */
 function extractAllSections(text, tag) {
+    const escapedTag = escapeRegExp(tag);
     // Strict: with closing tags
-    const re = new RegExp(`\\[${tag}[|\\]][\\s\\S]*?\\[/${tag}\\]`, 'gi');
+    const re = new RegExp(`\\[${escapedTag}[|\\]][\\s\\S]*?\\[/${escapedTag}\\]`, 'gi');
     const matches = [...text.matchAll(re)].map(m => m[0].trim());
     if (matches.length > 0) return matches;
 
     // Fallback: opening tags only (truncated response)
-    const fallbackRe = new RegExp(`\\[${tag}[|\\]][^\\[]*`, 'gi');
+    const fallbackRe = new RegExp(`\\[${escapedTag}[|\\]][^\\[]*`, 'gi');
     const fallbackMatches = [...text.matchAll(fallbackRe)].map(m => m[0].trim()).filter(Boolean);
     if (fallbackMatches.length > 0) {
         log(`extractAllSections('${tag}'): used truncation fallback`);
@@ -755,12 +772,13 @@ function parseUtilityResponse(rawResponse) {
     // Custom trackers — extract by their user-defined tag
     for (const ct of getActiveCustomTrackers()) {
         const k = customKey(ct);
+        const escapedTag = escapeRegExp(ct.tag);
         if (ct.multiEntry) {
             const lines = extractAllSections(rawResponse, ct.tag);
             if (lines) parsed[k] = lines.join('\n');
         } else {
             // Custom tags: try bracket-style wrapper [TAG]...[/TAG] first
-            const re = new RegExp(`\\[${ct.tag}\\]([\\s\\S]*?)\\[/${ct.tag}\\]`, 'i');
+            const re = new RegExp(`\\[${escapedTag}\\]([\\s\\S]*?)\\[/${escapedTag}\\]`, 'i');
             const match = rawResponse.match(re);
             if (match) {
                 parsed[k] = match[0].trim();
@@ -768,21 +786,21 @@ function parseUtilityResponse(rawResponse) {
                 // Pipe-style fallback: [TAG|content][/TAG]
                 // Models often collapse into this shape because every built-in
                 // tracker in the prompt uses [TAG|val|val] format.
-                const pipeRe = new RegExp(`\\[${ct.tag}\\|[\\s\\S]*?\\]\\s*\\[/${ct.tag}\\]`, 'i');
+                const pipeRe = new RegExp(`\\[${escapedTag}\\|[\\s\\S]*?\\]\\s*\\[/${escapedTag}\\]`, 'i');
                 const pipeMatch = rawResponse.match(pipeRe);
                 if (pipeMatch) {
                     parsed[k] = pipeMatch[0].trim();
                     log(`parseUtilityResponse: custom tracker '${ct.label}' captured pipe-style wrapper`);
                 } else {
                     // Fallback 1: missing opening tag — LLM forgot [TAG] but kept [/TAG]
-                    const missingOpenRe = new RegExp(`(?:\\[/(?:${getEffectiveBracketTags().filter(t => t !== ct.tag).join('|')})\\]|^)([\\s\\S]*?)\\[/${ct.tag}\\]`, 'i');
+                    const missingOpenRe = new RegExp(`(?:\\[/(?:${getEffectiveBracketTagPattern(ct.tag)})\\]|^)([\\s\\S]*?)\\[/${escapedTag}\\]`, 'i');
                     const om = rawResponse.match(missingOpenRe);
                     if (om && om[1] && om[1].trim()) {
                         parsed[k] = `[${ct.tag}]${om[1].trim()}[/${ct.tag}]`;
                         log(`parseUtilityResponse: custom tracker '${ct.label}' recovered missing opening tag`);
                     } else {
                         // Fallback 2: missing closing tag — opening present, no closer
-                        const fallbackRe = new RegExp(`\\[${ct.tag}\\][\\s\\S]*?(?=\\[(?:${getEffectiveBracketTags().join('|')})[|\\]]|$)`, 'i');
+                        const fallbackRe = new RegExp(`\\[${escapedTag}\\][\\s\\S]*?(?=\\[(?:${getEffectiveBracketTagPattern()})[|\\]]|$)`, 'i');
                         const fm = rawResponse.match(fallbackRe);
                         if (fm && fm[0].trim()) {
                             parsed[k] = fm[0].trim();
@@ -794,7 +812,7 @@ function parseUtilityResponse(rawResponse) {
                             // since the user's content format may start with "TAG:")
                             // to the next known tag or end-of-string, then normalize
                             // into a clean [TAG]...[/TAG] wrapper.
-                            const mangledRe = new RegExp(`\\[(${ct.tag}[\\s:|][\\s\\S]*?)(?=\\[(?:${getEffectiveBracketTags().join('|')})[|\\]:]|$)`, 'i');
+                            const mangledRe = new RegExp(`\\[(${escapedTag}[\\s:|][\\s\\S]*?)(?=\\[(?:${getEffectiveBracketTagPattern()})[|\\]:]|$)`, 'i');
                             const mm = rawResponse.match(mangledRe);
                             if (mm && mm[1] && mm[1].trim()) {
                                 const inner = mm[1].trim().replace(/\]+$/, '').trim();
@@ -951,7 +969,8 @@ function buildFormattedStateInjection() {
         if (latestTrackerState[k]) {
             // Strip wrapper tags for a cleaner injection
             let inner = latestTrackerState[k];
-            const stripRe = new RegExp(`\\[${ct.tag}\\]([\\s\\S]*?)\\[/${ct.tag}\\]`, 'i');
+            const escapedTag = escapeRegExp(ct.tag);
+            const stripRe = new RegExp(`\\[${escapedTag}\\]([\\s\\S]*?)\\[/${escapedTag}\\]`, 'i');
             const sm = inner.match(stripRe);
             if (sm) inner = sm[1].trim();
             parts.push(`${ct.label}: ${inner}`);
@@ -1003,47 +1022,19 @@ async function runUtilitiesGen() {
         }
     }
 
-    // ---- Summarizer-style safety guards ----
-
-    // Check if streaming is still in progress
-    if (typeof window !== 'undefined') {
-        const streamingProcessor = window?.SillyTavern?.streamingProcessor;
-        if (streamingProcessor && !streamingProcessor.isFinished) {
-            log('Skipping — streaming still in progress');
-            return;
-        }
-    }
-
     // Check if a VerseManager agent run is active
     if (window?.VerseManager?.agents?.isAgentRunActive?.()) {
         log('Skipping — VM agent run active');
         return;
     }
 
-    // Yield 1000ms then re-check guards (Summarizer pattern)
-    await new Promise(r => setTimeout(r, 1000));
-
-    // Re-check after yield
-    if (isGenerating) return;
-    if (typeof window !== 'undefined') {
-        const streamingProcessor = window?.SillyTavern?.streamingProcessor;
-        if (streamingProcessor && !streamingProcessor.isFinished) {
-            log('Skipping after yield — streaming still in progress');
-            return;
-        }
-    }
-    if (window?.VerseManager?.agents?.isAgentRunActive?.()) {
-        log('Skipping after yield — VM agent run active');
-        return;
-    }
-
-    await executeUtilitiesGen();
+    await executeUtilitiesGen({ persistResult: false });
 }
 
 /**
  * Execute the utilities gen (can be called manually or automatically).
  */
-export async function executeUtilitiesGen() {
+export async function executeUtilitiesGen({ persistResult = true } = {}) {
     if (isGenerating) {
         log('Skipping — already generating');
         return false;
@@ -1054,14 +1045,13 @@ export async function executeUtilitiesGen() {
         return false;
     }
 
+    const stateBeforeRun = { ...latestTrackerState };
     isGenerating = true;
     messagesSinceLastGen = 0;
     isCancelled = false;
     let success = false;
 
-    // Show ST's native stop (✕) button so the user can cancel tracker gen,
-    // even with the WL panel pinned open.
-    showStopButtonForGen();
+    const releaseSendLock = acquireGenerationLock(cancelUtilitiesGen);
 
     try {
         const settings = getSettings();
@@ -1108,6 +1098,7 @@ export async function executeUtilitiesGen() {
                     messages,
                     settings.utilityMaxTokens || 2000,
                     { extractData: true, stream: false, includePreset: false },
+                    { temperature: settings.utilityTemperature ?? 0.7 },
                 );
                 result = response?.content || '';
                 // Re-prepend the prefill character so the parser sees a complete first tag
@@ -1176,18 +1167,22 @@ export async function executeUtilitiesGen() {
         }
         log('Parsed sections:', parsedSummary);
 
-        // Update in-memory state
+        // Missing sections carry forward the state from before this run rather
+        // than disappearing after a partial model response.
         for (const key of getEffectiveKeys()) {
-            if (parsed[key]) latestTrackerState[key] = parsed[key];
+            latestTrackerState[key] = parsed[key] || stateBeforeRun[key] || latestTrackerState[key] || null;
         }
 
         // Store in metadata + render overlay (new architecture)
         const hasData = Object.values(parsed).some(v => v !== null);
         if (hasData) {
-            await storeTrackerResult(parsed);
-            renderAllTrackerOverlays();
-            log('Utilities gen complete');
-            success = true;
+            const storedEntry = await storeTrackerResult(parsed, { persist: persistResult });
+            if (storedEntry) {
+                success = true;
+                $(`#chat .mes[mesid="${storedEntry.messageIndex}"] .${OVERLAY_CLASS}-wrapper[data-wl-tracker-group]`).remove();
+                renderTrackerOverlay(storedEntry);
+                log('Utilities gen complete');
+            }
         } else {
             log('No tracker data parsed from response — model may have produced unexpected format');
             toastr.info('Tracker generation completed but no data could be parsed. Check console for the raw response.', 'White Lotus');
@@ -1197,9 +1192,12 @@ export async function executeUtilitiesGen() {
         logError('Utilities gen failed:', err);
         toastr.error(`Tracker generation failed: ${err.message || 'Unknown error'}`, 'White Lotus');
     } finally {
+        if (!success) {
+            latestTrackerState = stateBeforeRun;
+        }
         isGenerating = false;
         isCancelled = false;
-        hideStopButtonForGen();
+        releaseSendLock();
     }
 
     return success;
@@ -1248,29 +1246,22 @@ export function initUtilitiesGen(isActiveCheck) {
     // Capture triggered world info entries for use in utility gen prompts
     eventSource.on(event_types.WORLD_INFO_ACTIVATED, (entries) => {
         if (!isActiveCheck()) return;
-        if (Array.isArray(entries) && entries.length > 0) {
-            cachedWorldInfo = entries;
+        cachedWorldInfo = Array.isArray(entries) ? entries : [];
+        if (cachedWorldInfo.length > 0) {
             log(`Cached ${entries.length} world info entries from main generation`);
         }
     });
 
     // After main generation completes
-    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+    eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (!isActiveCheck()) return;
 
         const settings = getSettings();
 
         if (settings.useSeparateGen) {
-            // Fire-and-forget — do NOT await inside this handler.
-            // ST awaits MESSAGE_RECEIVED listeners, so awaiting here blocks the
-            // rest of the generation pipeline (send button re-enable, chat save)
-            // until tracker gen finishes. saveChatConditional then deadlocks
-            // against the generation lock we're holding open → "Timeout waiting
-            // for chat to save". The guards inside runUtilitiesGen already
-            // handle streaming/agent-run race conditions.
-            setTimeout(() => {
-                runUtilitiesGen().catch(err => logError('Auto utilities gen failed:', err));
-            }, 0);
+            // ST awaits this event. Metadata is mutated here and persisted by
+            // the normal post-message save after the sidecar completes.
+            await runUtilitiesGen();
         }
         // Preset mode: LLM writes tags inline, regex styles them.
         // No reloadCurrentChat needed — ST renders regex on its own.
@@ -1279,10 +1270,7 @@ export function initUtilitiesGen(isActiveCheck) {
     // Rebuild overlays when chat renders (ephemeral DOM elements)
     eventSource.on(event_types.CHAT_CHANGED, () => {
         resetTrackerState();
-        // Defer overlay rendering slightly to let DOM settle
-        setTimeout(() => {
-            if (isActiveCheck()) renderAllTrackerOverlays();
-        }, 200);
+        scheduleFullOverlayRender(isActiveCheck);
     });
 
     // Swipe awareness: when user navigates to a different swipe,
@@ -1309,11 +1297,10 @@ export function initUtilitiesGen(isActiveCheck) {
                 );
 
                 if (matchingEntry?.data) {
+                    const restoredState = getAccumulatedTrackerState(numericId + 1);
                     // This swipe has tracker data — render it and update state
                     for (const key of getEffectiveKeys()) {
-                        if (matchingEntry.data[key]) {
-                            latestTrackerState[key] = matchingEntry.data[key];
-                        }
+                        latestTrackerState[key] = restoredState[key] || null;
                     }
                     renderTrackerOverlay(matchingEntry);
                     log(`Restored tracker overlay for message ${numericId} swipe ${activeSwipeId}`);
@@ -1331,9 +1318,9 @@ export function initUtilitiesGen(isActiveCheck) {
 
     // Also rebuild after individual messages render
     if (event_types.MESSAGE_RENDERED) {
-        eventSource.on(event_types.MESSAGE_RENDERED, () => {
+        eventSource.on(event_types.MESSAGE_RENDERED, (messageIndex) => {
             if (!isActiveCheck()) return;
-            renderAllTrackerOverlays();
+            scheduleMessageOverlayRender(messageIndex, isActiveCheck);
         });
     }
 

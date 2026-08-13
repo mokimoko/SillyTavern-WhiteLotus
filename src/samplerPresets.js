@@ -445,7 +445,7 @@ export function applySamplerPreset(presetKey) {
  * Build the dropdown HTML for the sampler preset selector.
  * Groups presets by family using <optgroup>.
  */
-export function buildSamplerDropdownHTML() {
+export function buildSamplerDropdownHTML(id = 'wl-sampler-preset') {
     // Collect families in order of first appearance
     const families = [];
     const familyMap = {};
@@ -470,7 +470,7 @@ export function buildSamplerDropdownHTML() {
     return `
         <div class="wl-control-row wl-sampler-row">
             <label class="wl-label"><i class="fa-solid fa-sliders wl-toggle-icon"></i>Sampler</label>
-            <select class="wl-select" id="wl-sampler-preset" data-key="samplerPreset">${optionsHTML}</select>
+            <select class="wl-select" id="${id}" data-key="samplerPreset" data-sampler-preset>${optionsHTML}</select>
         </div>`;
 }
 

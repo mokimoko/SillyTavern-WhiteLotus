@@ -3,21 +3,20 @@
 //
 // UI sections and module routing are driven by moduleRegistry.js.
 // Adding a new toggle/group/tracker to the registry auto-wires it
-// into the panel, preset bridge, payload counter, and settings.
+// into the panel, preset controls, payload counter, and settings.
 
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
-import { extension_settings } from '../../../extensions.js';
 import { oai_settings } from '../../../openai.js';
 import { ConnectionManagerRequestService } from '../../../extensions/shared.js';
 
-import { MODULE_NAME, ensureSettings, getSettings, getSetting, setSetting } from './src/settings.js';
+import { ensureSettings, getSettings, getSetting, setSetting } from './src/settings.js';
 import {
     initGenerationHooks,
-    readPresetState,
     applyToggle,
     applyExclusiveGroup,
     applyTrackerToggle,
     getActivePromptOrder,
+    setPromptEnabled,
 } from './src/presetBridge.js';
 import {
     initUtilitiesGen,
@@ -32,138 +31,160 @@ import {
 import {
     TOGGLES, EXCLUSIVE_GROUPS, TRACKERS, INFRA, UI_SECTIONS,
     TOGGLE_KEYS, TRACKER_KEYS, GROUP_KEYS,
-    buildCategoryMap, getTogglesByCategory, getGroupOptions,
+    getTogglesByCategory, getGroupOptions,
+    classifyPromptOrder,
 } from './src/moduleRegistry.js';
+
+// Preset installer — bundled White Lotus preset install/update
+import {
+    installBundledPreset,
+    getInstallState,
+    BUNDLED_VERSION,
+} from './src/presetInstaller.js';
 
 // Sampler presets — quick-switch sampler configurations per model
 import { applySamplerPreset, buildSamplerDropdownHTML, getSamplerNote } from './src/samplerPresets.js';
 import { createLogger } from './src/debug.js';
+import {
+    PRESET_IDS,
+    getPresetMetadata,
+    getSemanticVersionFromName,
+} from './src/presetMetadata.js';
+import {
+    BUNDLED_PB_VERSION,
+    getPlumBlossomInstallState,
+    installBundledPlumBlossom,
+} from './src/plumBlossomInstaller.js';
+import {
+    PB_ANALYZE_SCENE_PROMPT_ID,
+    executePlumAnalysis,
+    initPlumAnalysis,
+    isPlumSeparateAnalysisEnabled,
+} from './src/plumBlossomAnalysis.js';
+import {
+    buildPlumBlossomControlsHTML,
+    refreshPlumBlossomControls,
+    wirePlumBlossomControls,
+} from './src/plumBlossomControls.js';
+import {
+    PB_NATIVE_DEBUG_PROMPT_ID,
+    initPlumDebugInspector,
+    openPlumDebugInspector,
+    syncNativePlumDebug,
+    updatePlumDebugButton,
+} from './src/plumBlossomDebug.js';
+import {
+    PB_NATIVE_ACTION_PROMPT_IDS,
+    syncNativePlumActions,
+} from './src/plumBlossomActions.js';
+import {
+    PRESET_MODES,
+    getPresetModeAvailability,
+    selectPresetMode,
+} from './src/presetModeSwitcher.js';
+import {
+    initPromptControlOwnership,
+    refreshPromptControlOwnership,
+} from './src/promptControlOwnership.js';
+import { initPayloadCounter, renderPayloadCounter } from './src/payloadCounter.js';
 
 const { log, logError } = createLogger();
-
-// ============================================================
-// Payload Estimation
-// ============================================================
-
-/** Category map built from the registry — promptId → category string */
-const CATEGORY_MAP = buildCategoryMap();
-
-/**
- * Calculate estimated token payload from all enabled WL-managed prompts.
- */
-function calculatePayload() {
-    if (!Array.isArray(oai_settings.prompts)) return null;
-
-    const order = getActivePromptOrder();
-    const enabledIds = new Set(order.filter(e => e.enabled).map(e => e.identifier));
-
-    const contentById = {};
-    for (const prompt of oai_settings.prompts) {
-        if (prompt.identifier && prompt.content) {
-            contentById[prompt.identifier] = prompt.content;
-        }
-    }
-
-    const charCounts = { Main: 0, Core: 0, Parameters: 0, Tweaks: 0, Fixes: 0, Tools: 0, NSFW: 0, Trackers: 0 };
-
-    for (const id of enabledIds) {
-        const content = contentById[id];
-        if (!content) continue;
-        const cat = CATEGORY_MAP[id] || 'Core';
-        charCounts[cat] += content.length;
-    }
-
-    const tokens = {};
-    let total = 0;
-    for (const [cat, chars] of Object.entries(charCounts)) {
-        tokens[cat] = Math.ceil(chars / 4);
-        total += tokens[cat];
-    }
-
-    return { tokens, total };
-}
-
-/**
- * Update the payload display in the panel footer.
- */
-function updatePayloadDisplay() {
-    const badge = document.getElementById('wl-payload-count');
-    const breakdown = document.getElementById('wl-payload-breakdown');
-    if (!badge) return;
-
-    const result = calculatePayload();
-    if (!result) {
-        badge.textContent = '—';
-        if (breakdown) breakdown.innerHTML = '';
-        return;
-    }
-
-    badge.textContent = `~${result.total}`;
-
-    badge.style.color = 'var(--wl-accent)';
-    setTimeout(() => { badge.style.color = ''; }, 400);
-
-    if (breakdown) {
-        const lines = [];
-        const order = ['Main', 'Core', 'Parameters', 'Tweaks', 'Fixes', 'Tools', 'NSFW', 'Trackers'];
-        for (const cat of order) {
-            const t = result.tokens[cat] || 0;
-            if (t > 0) {
-                lines.push(`<span class="wl-payload-row"><span>${cat}</span><span>~${t}</span></span>`);
-            }
-        }
-        breakdown.innerHTML = lines.join('');
-    }
-}
 
 // ============================================================
 // State
 // ============================================================
 
 let isWhiteLotusActive = false;
+let isPlumBlossomActive = false;
 let isPanelOpen = false;
 let isPanelPinned = false;
 let detectedVersion = null;
 let detectedVariant = null;
+let detectedPlumVersion = null;
+let modeSwitchInProgress = false;
+let panelMode = PRESET_MODES.WHITE_LOTUS;
+
+function refreshPayloadDisplay() {
+    const active = panelMode === PRESET_MODES.PLUM_BLOSSOM
+        ? isPlumBlossomActive
+        : isWhiteLotusActive;
+    renderPayloadCounter(panelMode, active);
+}
 
 // ============================================================
 // Preset Detection
 // ============================================================
 
 /**
- * Check if the current preset is White Lotus by name.
- * Only presets with "White Lotus" in the name are managed by this extension.
+ * Detect White Lotus from embedded preset metadata, with signature fallback for
+ * legacy 4.2.1 imports that predate the metadata marker.
+ *
+ * Returns: { active, version, variant }
  */
 function detectWhiteLotusPreset() {
+    const order = getActivePromptOrder();
+    const { state } = classifyPromptOrder(order);
+    const metadata = getPresetMetadata({ extensions: oai_settings.extensions });
     const presetName = oai_settings.preset_settings_openai || '';
 
-    // Versioned bracket format: WHITE LOTUS [2.0.0] or WHITE LOTUS [2.0.0] [Variant]
-    const versionMatch = presetName.match(/WHITE\s*LOTUS\s*\[(\d+\.\d+\.\d+)\](?:\s*\[(.+?)\])?/i);
-    if (versionMatch) {
-        return { active: true, version: versionMatch[1], variant: versionMatch[2] || null };
-    }
+    const markedWhiteLotus = metadata?.id === PRESET_IDS.WHITE_LOTUS;
+    const legacyWhiteLotus = !metadata && (
+        state === 'current' || /\bwhite\s+lotus\b/i.test(presetName)
+    );
 
-    // Hyphenated shipped format: white-lotus-3.0.0 (optionally trailing -variant)
-    const hyphenMatch = presetName.match(/white-lotus-(\d+\.\d+\.\d+)(?:-(.+))?/i);
-    if (hyphenMatch) {
-        return { active: true, version: hyphenMatch[1], variant: hyphenMatch[2] || null };
-    }
-
-    // Unversioned fallback: any preset name containing "White Lotus"
-    if (/white\s*lotus/i.test(presetName)) {
-        return { active: true, version: null, variant: null };
+    if (markedWhiteLotus || legacyWhiteLotus) {
+        const variantMatch = presetName.match(/\[(?:[^\]]*?)\]\s*\[(.+?)\]/);
+        const variant = variantMatch ? variantMatch[1] : null;
+        const version = metadata?.version
+            || getSemanticVersionFromName(presetName)
+            || (state === 'current' ? BUNDLED_VERSION : null);
+        return { active: true, version, variant };
     }
 
     return { active: false, version: null, variant: null };
 }
 
+/** Detect a compatible Plum Blossom preset from identity plus state-machine prompts. */
+function detectPlumBlossomPreset() {
+    const metadata = getPresetMetadata({ extensions: oai_settings.extensions });
+    if (metadata && metadata.id !== PRESET_IDS.PLUM_BLOSSOM) {
+        return { active: false, version: null };
+    }
+
+    const promptIds = new Set((oai_settings.prompts || []).map(prompt => prompt.identifier));
+    const requiredIds = ['pb_defaults', 'pb_t_analysis', 'pb_e3_commit', 'pb_turnstart'];
+    const compatible = requiredIds.every(id => promptIds.has(id));
+    const presetName = oai_settings.preset_settings_openai || '';
+    const active = metadata?.id === PRESET_IDS.PLUM_BLOSSOM
+        || compatible
+        || (!metadata && /\bplum\s+blossom\b/i.test(presetName));
+    const version = active
+        ? metadata?.version || getSemanticVersionFromName(presetName) || BUNDLED_PB_VERSION
+        : null;
+    return { active, version };
+}
+
 function refreshPresetDetection() {
     const wasActive = isWhiteLotusActive;
+    const wasPlumActive = isPlumBlossomActive;
     const prevVersion = detectedVersion;
     const detection = detectWhiteLotusPreset();
     isWhiteLotusActive = detection.active;
     detectedVersion = detection.version;
     detectedVariant = detection.variant;
+    const plumDetection = detectPlumBlossomPreset();
+    isPlumBlossomActive = plumDetection.active;
+    detectedPlumVersion = plumDetection.version;
+
+    // Supported presets follow their matching view. Unrelated presets do not
+    // change the user's remembered WL/PB panel mode.
+    const detectedMode = isPlumBlossomActive
+        ? PRESET_MODES.PLUM_BLOSSOM
+        : isWhiteLotusActive ? PRESET_MODES.WHITE_LOTUS : null;
+    if (detectedMode && panelMode !== detectedMode) {
+        panelMode = detectedMode;
+        setSetting('panelMode', panelMode);
+    }
 
     if (isWhiteLotusActive && !wasActive) {
         log('White Lotus preset detected ✓',
@@ -185,35 +206,30 @@ function refreshPresetDetection() {
         updateTriggerButton();
     }
 
+    if (isPlumBlossomActive) {
+        syncNativePlumDebug();
+        syncNativePlumActions();
+        if ((oai_settings.prompts || []).some(prompt => prompt.identifier === PB_ANALYZE_SCENE_PROMPT_ID)) {
+            setPromptEnabled(PB_ANALYZE_SCENE_PROMPT_ID, !getSetting('plumBlossomSeparateAnalysis'));
+        }
+        syncPromptManagerDOM([PB_ANALYZE_SCENE_PROMPT_ID, PB_NATIVE_DEBUG_PROMPT_ID, ...PB_NATIVE_ACTION_PROMPT_IDS]);
+        if (!wasPlumActive) {
+            log('Plum Blossom preset detected ✓', detectedPlumVersion ? `v${detectedPlumVersion}` : '');
+        }
+    } else if (wasPlumActive) {
+        log('Plum Blossom preset no longer active');
+    }
+
+    updateTriggerButton();
+    refreshPromptControlOwnership();
+
+    // Keep the installer button label in sync with install/version state
+    updateInstallerButton();
+
     // Refresh panel UI when open (handles pinned panel on preset switch)
     if (isPanelOpen) {
         refreshPanelUI();
     }
-}
-
-/**
- * Read current preset state into extension settings (one-time bootstrap).
- * NOT used in the normal activation flow — applySettingsToPreset() handles that.
- * Kept for potential future use (e.g. "Reset to preset defaults" button).
- */
-function syncSettingsFromPreset() {
-    const presetState = readPresetState();
-    const settings = getSettings();
-
-    // When useSeparateGen is active, skip tracker keys
-    const skipKeys = settings.useSeparateGen
-        ? new Set(TRACKER_KEYS)
-        : new Set();
-
-    for (const [key, value] of Object.entries(presetState)) {
-        if (skipKeys.has(key)) continue;
-        if (key in settings && value !== undefined) {
-            settings[key] = value;
-        }
-    }
-
-    saveSettingsDebounced();
-    log('Synced settings from preset state', skipKeys.size ? `(skipped ${skipKeys.size} tracker keys — useSeparateGen active)` : '');
 }
 
 /**
@@ -273,13 +289,128 @@ function updateTriggerButton() {
     const btn = document.getElementById('wl-trigger-btn');
     if (!btn) return;
 
-    btn.classList.toggle('wl-active', isWhiteLotusActive);
-    if (isWhiteLotusActive) {
+    btn.classList.toggle('wl-active', isWhiteLotusActive || isPlumBlossomActive);
+    if (isPlumBlossomActive) {
+        btn.title = `Plum Blossom${detectedPlumVersion ? ` ${detectedPlumVersion}` : ''} (Active)`;
+    } else if (isWhiteLotusActive) {
         const label = detectedVersion ? `White Lotus ${detectedVersion}` : 'White Lotus';
         const tag = detectedVariant ? ` [${detectedVariant}]` : '';
         btn.title = `${label}${tag} (Active)`;
     } else {
         btn.title = 'White Lotus (Preset not detected)';
+    }
+}
+
+function getActivePresetMode() {
+    if (isPlumBlossomActive) return PRESET_MODES.PLUM_BLOSSOM;
+    if (isWhiteLotusActive) return PRESET_MODES.WHITE_LOTUS;
+    return null;
+}
+
+async function togglePresetMode(panel) {
+    if (modeSwitchInProgress) return;
+    const targetMode = panelMode === PRESET_MODES.PLUM_BLOSSOM
+        ? PRESET_MODES.WHITE_LOTUS
+        : PRESET_MODES.PLUM_BLOSSOM;
+    panelMode = targetMode;
+    setSetting('panelMode', panelMode);
+    refreshPanelUI();
+
+    // A header click switches through ST's native preset lifecycle when the
+    // companion is installed. If it is absent, the view still toggles so the
+    // user can see its inactive controls without an implicit installation.
+    const availability = getPresetModeAvailability();
+    if (!availability[targetMode] || targetMode === getActivePresetMode()) return;
+    modeSwitchInProgress = true;
+    panel?.querySelector('#wl-mode-trigger')?.setAttribute('aria-busy', 'true');
+    try {
+        selectPresetMode(targetMode);
+        setTimeout(refreshPresetDetection, 0);
+    } catch (error) {
+        logError('Preset mode switch failed:', error);
+        globalThis.toastr?.error('Could not switch presets. Check the console for details.', 'White Lotus / Plum Blossom');
+    } finally {
+        modeSwitchInProgress = false;
+        panel?.querySelector('#wl-mode-trigger')?.removeAttribute('aria-busy');
+    }
+}
+
+// ============================================================
+// Installer Button (panel header)
+// ============================================================
+
+let installInProgress = false;
+
+/**
+ * Update the panel-header installer button label/visibility from install state.
+ *   - not installed      → "Install preset"
+ *   - update available   → "Update preset"
+ *   - up to date         → hidden (nothing to do)
+ */
+function updateInstallerButton() {
+    const btn = document.getElementById('wl-installer-btn');
+    if (!btn) return;
+
+    if (installInProgress) {
+        btn.textContent = 'Installing…';
+        btn.classList.remove('wl-hidden');
+        btn.disabled = true;
+        return;
+    }
+    btn.disabled = false;
+
+    // The button belongs to the mode being viewed, even when the other preset
+    // (or an unrelated preset) is currently active in SillyTavern.
+    const isPlum = panelMode === PRESET_MODES.PLUM_BLOSSOM;
+    const { status } = isPlum ? getPlumBlossomInstallState() : getInstallState();
+    const presetLabel = isPlum ? 'Plum Blossom' : 'White Lotus';
+    const bundledVersion = isPlum ? BUNDLED_PB_VERSION : BUNDLED_VERSION;
+    btn.dataset.presetMode = panelMode;
+
+    if (status === 'not_installed') {
+        btn.textContent = 'Install Preset';
+        btn.title = `Install the bundled ${presetLabel} preset (v${bundledVersion}).`;
+        btn.dataset.mode = 'install';
+        btn.classList.remove('wl-hidden');
+    } else if (status === 'update_available') {
+        btn.textContent = 'Update Preset';
+        btn.title = `Update the ${presetLabel} preset to v${bundledVersion}.`;
+        btn.dataset.mode = 'update';
+        btn.classList.remove('wl-hidden');
+    } else if (status === 'repair_available') {
+        btn.textContent = 'Repair Preset';
+        btn.title = `Restore required ${presetLabel} v${bundledVersion} prompt blocks.`;
+        btn.dataset.mode = 'repair';
+        btn.classList.remove('wl-hidden');
+    } else {
+        // up to date — nothing to offer
+        btn.classList.add('wl-hidden');
+    }
+}
+
+/** Run an install/update from the panel button. */
+async function handleInstallerClick() {
+    if (installInProgress) return;
+    const btn = document.getElementById('wl-installer-btn');
+    const targetMode = btn?.dataset.presetMode || panelMode;
+    const isPlum = targetMode === PRESET_MODES.PLUM_BLOSSOM;
+    installInProgress = true;
+    updateInstallerButton();
+
+    try {
+        const result = isPlum
+            ? await installBundledPlumBlossom({ selectAfterInstall: true })
+            : await installBundledPreset({ selectAfterInstall: true });
+        const presetLabel = isPlum ? 'Plum Blossom' : 'White Lotus';
+        globalThis.toastr?.success(`${presetLabel} preset ${result.version} installed.`, presetLabel);
+        // Re-detect against the freshly installed/selected preset.
+        refreshPresetDetection();
+    } catch (err) {
+        logError('Preset install/update failed:', err);
+        globalThis.toastr?.error('Preset install failed. Check the console for details.', isPlum ? 'Plum Blossom' : 'White Lotus');
+    } finally {
+        installInProgress = false;
+        updateInstallerButton();
     }
 }
 
@@ -437,6 +568,14 @@ function parsePrefixSelects(prefix) {
     return html;
 }
 
+function buildWhiteLotusChooseBanner() {
+    return `
+        <div class="wl-choose-banner wl-choose-banner-lotus">
+            <span class="wl-choose-mark" aria-hidden="true">蓮</span>
+            <div><strong>Choose</strong><span>Shape White Lotus to fit this story and model.</span></div>
+        </div>`;
+}
+
 function buildPanelHTML() {
     // Build controls view sections from the registry
     let controlSections = '';
@@ -447,7 +586,11 @@ function buildPanelHTML() {
     return `
         <div class="wl-panel-header">
             <div class="wl-panel-title-group">
-                <div class="wl-panel-title">White Lotus</div>
+                <button class="wl-panel-mode-trigger" id="wl-mode-trigger" type="button" title="Switch between White Lotus and Plum Blossom">
+                    <span class="wl-panel-title">White Lotus</span>
+                    <i class="fa-solid fa-repeat" aria-hidden="true"></i>
+                </button>
+                <button class="wl-installer-btn wl-hidden" id="wl-installer-btn" type="button" title="Install or update the bundled White Lotus preset"></button>
             </div>
             <div class="wl-panel-header-actions">
                 <div class="wl-panel-pin" id="wl-panel-pin" title="Pin panel open"><i class="fa-solid fa-thumbtack"></i></div>
@@ -466,7 +609,14 @@ function buildPanelHTML() {
                 <span class="wl-status-text">Detecting preset...</span>
             </div>
 
-            ${controlSections}
+            <div id="wl-mode-controls">
+                ${buildWhiteLotusChooseBanner()}
+                ${controlSections}
+            </div>
+
+            <div id="pb-mode-controls" class="wl-hidden">
+                ${buildPlumBlossomControlsHTML(buildSamplerDropdownHTML('pb-sampler-preset'))}
+            </div>
 
             </div><!-- end wl-view-controls -->
 
@@ -475,21 +625,14 @@ function buildPanelHTML() {
 
                 <div class="wl-settings-back" id="wl-settings-back">← Back to Controls</div>
 
-                <!-- Tracker Generation -->
-                <div class="wl-section" data-section="tracker-gen">
+                <!-- White Lotus tracker scheduling -->
+                <div class="wl-section" id="wl-settings-tracker-gen" data-section="tracker-gen">
                     <div class="wl-section-header">Tracker Generation</div>
                     <div class="wl-section-body">
                         ${buildToggleRow('useSeparateGen', 'Use separate generation')}
                         <div class="wl-setting-hint">When on, trackers run as a separate AI call after each response instead of inline in the main generation.</div>
 
                         <div class="wl-sep-gen-options" id="wl-sep-gen-options">
-                            <div class="wl-control-row">
-                                <label class="wl-label">Connection</label>
-                                <select class="wl-select" id="wl-utility-profile">
-                                    <option value="">Current model</option>
-                                </select>
-                            </div>
-                            <div class="wl-setting-hint" id="wl-profile-hint">Use a saved Connection Profile for tracker generation. Create profiles in ST's Connection Manager.</div>
                             ${buildSelectRow('utilityAutoRun', 'Auto-run', {
                                 every: 'Every message',
                                 every_n: 'Every N messages',
@@ -499,23 +642,53 @@ function buildPanelHTML() {
                                 <label class="wl-label">N</label>
                                 <input type="number" class="wl-input-number" data-key="utilityAutoRunInterval" min="2" max="10" value="3">
                             </div>
-                            ${buildSelectRow('utilityScanDepth', 'Scan Depth', {
-                                '1': '1 pair',
-                                '2': '2 pairs',
-                                '3': '3 pairs',
-                            })}
                         </div>
                     </div>
                 </div>
 
-                <!-- Gen Parameters -->
-                <div class="wl-section" data-section="gen-params">
-                    <div class="wl-section-header">Generation Parameters</div>
+                <!-- Plum Blossom analysis scheduling -->
+                <div class="wl-section wl-hidden" id="pb-settings-analysis-gen" data-section="analysis-gen">
+                    <div class="wl-section-header">Analysis Generation</div>
                     <div class="wl-section-body">
+                        ${buildToggleRow('plumBlossomSeparateAnalysis', 'Use separate generation')}
+                        <div class="wl-setting-hint">When on, scene analysis runs as a separate AI call instead of inline with narration.</div>
+
+                        <div class="wl-sep-gen-options" id="pb-sep-gen-options">
+                            ${buildSelectRow('plumBlossomAnalysisAutoRun', 'Auto-run', {
+                                every: 'Every message',
+                                every_n: 'Every N messages',
+                                manual: 'Manual only',
+                            })}
+                            <div class="wl-control-row" id="pb-autorun-n-row">
+                                <label class="wl-label">N</label>
+                                <input type="number" class="wl-input-number" data-key="plumBlossomAnalysisAutoRunInterval" min="2" max="10" value="3">
+                            </div>
+                            <div class="wl-setting-hint">Manual Run Analysis remains available at any interval.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shared sidecar parameters -->
+                <div class="wl-section" data-section="gen-params">
+                    <div class="wl-section-header">Sidecar Generation</div>
+                    <div class="wl-section-body">
+                        <div class="wl-control-row">
+                            <label class="wl-label">Connection</label>
+                            <select class="wl-select" id="wl-utility-profile">
+                                <option value="">Current model</option>
+                            </select>
+                        </div>
+                        <div class="wl-setting-hint" id="wl-profile-hint">Use a saved Connection Profile for separate tracker or scene-analysis generation.</div>
+                        ${buildSelectRow('utilityScanDepth', 'Scan Depth', {
+                            '1': '1 pair',
+                            '2': '2 pairs',
+                            '3': '3 pairs',
+                        })}
                         <div class="wl-control-row">
                             <label class="wl-label">Temperature</label>
                             <input type="number" class="wl-input-number" data-key="utilityTemperature" min="0" max="1.5" step="0.1" value="0.7">
                         </div>
+                        <div class="wl-setting-hint">Temperature applies to saved Connection Profiles. “Current model” uses the active SillyTavern sampler settings.</div>
                         <div class="wl-control-row">
                             <label class="wl-label">Max Tokens</label>
                             <input type="number" class="wl-input-number" data-key="utilityMaxTokens" min="500" max="2000" step="100" value="1000">
@@ -524,7 +697,7 @@ function buildPanelHTML() {
                 </div>
 
                 <!-- Custom Trackers -->
-                <div class="wl-section" data-section="custom-trackers">
+                <div class="wl-section" id="wl-settings-custom-trackers" data-section="custom-trackers">
                     <div class="wl-section-header" style="display:flex;justify-content:space-between;align-items:center;">
                         <span>Custom Trackers</span>
                         <span class="wl-ct-add" id="wl-ct-add" title="Add custom tracker" style="cursor:pointer;font-size:1em;opacity:0.5;line-height:1;">+</span>
@@ -533,8 +706,19 @@ function buildPanelHTML() {
                     <div class="wl-setting-hint">User-defined trackers for sep-gen pipeline. Each needs a bracket tag, prompt, and regex for rendering.</div>
                 </div>
 
+                <div class="wl-section wl-collapsible wl-collapsed" data-section="preset-integrity">
+                    <div class="wl-section-header"><span class="wl-section-chevron">▸</span>Advanced Preset Integrity</div>
+                    <div class="wl-section-body">
+                        <div class="wl-control-row">
+                            <span class="wl-label">Status</span>
+                            <span id="wl-integrity-status">Checking…</span>
+                        </div>
+                        <div class="wl-setting-hint" id="wl-integrity-detail">Compares the preset's embedded version and required White Lotus prompt blocks.</div>
+                    </div>
+                </div>
+
                 <!-- About -->
-                <div class="wl-about-text">White Lotus Extension v0.2.1</div>
+                <div class="wl-about-text">White Lotus / Plum Blossom Extension v0.5.6 · WL ${BUNDLED_VERSION} · PB ${BUNDLED_PB_VERSION}</div>
 
             </div><!-- end wl-view-settings -->
 
@@ -543,7 +727,7 @@ function buildPanelHTML() {
         <!-- ═══ PAYLOAD FOOTER ═══ -->
         <div class="wl-panel-footer" id="wl-panel-footer">
             <div class="wl-payload-label">
-                <span>Payload</span>
+                <span id="wl-payload-title">Last preset payload</span>
                 <span class="wl-payload-badge" id="wl-payload-count">—</span>
             </div>
             <div class="wl-payload-breakdown" id="wl-payload-breakdown"></div>
@@ -563,7 +747,9 @@ function buildPanelHTML() {
 function getAffectedPromptIds(key) {
     const ids = [];
 
-    if (key in TOGGLES) {
+    if (key === 'plumBlossomSeparateAnalysis') {
+        ids.push(PB_ANALYZE_SCENE_PROMPT_ID);
+    } else if (key in TOGGLES) {
         ids.push(...TOGGLES[key].promptIds);
     } else if (key in TRACKERS) {
         ids.push(TRACKERS[key].promptId);
@@ -617,11 +803,17 @@ function syncPromptManagerDOM(identifiers) {
 
 // ============================================================
 // Immediate Preset Application
-// Routes setting changes to the correct bridge function.
+// Routes setting changes to the correct preset-control function.
 // Uses the registry to determine routing — no hardcoded maps.
 // ============================================================
 
 function applySettingToPreset(key, value) {
+    if (key === 'plumBlossomSeparateAnalysis') {
+        if (!isPlumBlossomActive) return;
+        setPromptEnabled(PB_ANALYZE_SCENE_PROMPT_ID, !value);
+        return;
+    }
+
     if (!isWhiteLotusActive) return;
 
     // Simple toggles (tweaks, fixes, tools — including multi-prompt like Kimi)
@@ -636,13 +828,12 @@ function applySettingToPreset(key, value) {
         return;
     }
 
-    // Exclusive groups (including NSFW — masterToggleId handled generically)
+    // Exclusive groups — includes tense/pov (4.2.0+), NSFW (masterToggleId),
+    // length, narrator, diction, genre. All handled generically.
     if (key in EXCLUSIVE_GROUPS) {
         applyExclusiveGroup(key, value);
         return;
     }
-
-    // tense, pov → deferred to generation time (content swap needs save/restore)
 }
 
 // ============================================================
@@ -786,6 +977,13 @@ function wirePanelEvents(panel) {
     // Close button
     panel.querySelector('#wl-panel-close')?.addEventListener('click', closePanel);
 
+    // Installer button (Install / Update bundled preset)
+    panel.querySelector('#wl-installer-btn')?.addEventListener('click', handleInstallerClick);
+    updateInstallerButton();
+
+    const modeTrigger = panel.querySelector('#wl-mode-trigger');
+    modeTrigger?.addEventListener('click', () => togglePresetMode(panel));
+
     // Collapsible section headers
     panel.querySelectorAll('.wl-section.wl-collapsible .wl-section-header').forEach(header => {
         header.addEventListener('click', () => {
@@ -855,26 +1053,31 @@ function wirePanelEvents(panel) {
                 }
             }
 
-            updatePayloadDisplay();
+            refreshPayloadDisplay();
             log(`Setting changed: ${key} = ${value}`);
         });
     });
 
     // Sampler preset dropdown — applies sampler values to oai_settings + sliders
-    panel.querySelector('#wl-sampler-preset')?.addEventListener('change', (e) => {
-        const presetKey = e.target.value;
-        if (!presetKey) return;
+    panel.querySelectorAll('[data-sampler-preset]').forEach(sampler => {
+        sampler.addEventListener('change', (e) => {
+            const presetKey = e.target.value;
+            if (!presetKey) return;
 
-        const applied = applySamplerPreset(presetKey);
-        if (applied) {
-            setSetting('samplerPreset', presetKey);
-            const note = getSamplerNote(presetKey);
-            log(`Sampler preset applied: ${presetKey}${note ? ` (${note})` : ''}`);
-        }
+            const applied = applySamplerPreset(presetKey);
+            if (applied) {
+                setSetting('samplerPreset', presetKey);
+                panel.querySelectorAll('[data-sampler-preset]').forEach(other => {
+                    other.value = presetKey;
+                });
+                const note = getSamplerNote(presetKey);
+                log(`Sampler preset applied: ${presetKey}${note ? ` (${note})` : ''}`);
+            }
+        });
     });
 
     // Toggle changes — generic handler
-    panel.querySelectorAll('.wl-toggle input[type="checkbox"]').forEach(checkbox => {
+    panel.querySelectorAll('.wl-toggle input[type="checkbox"][data-key]').forEach(checkbox => {
         checkbox.addEventListener('change', (e) => {
             const key = e.target.dataset.key;
             const value = e.target.checked;
@@ -884,7 +1087,7 @@ function wirePanelEvents(panel) {
             applySettingToPreset(key, value);
             syncPromptManagerDOM(getAffectedPromptIds(key));
 
-            updatePayloadDisplay();
+            refreshPayloadDisplay();
             log(`Toggle changed: ${key} = ${value}`);
         });
     });
@@ -918,6 +1121,35 @@ function wirePanelEvents(panel) {
             }
         });
     }
+
+    const runAnalysisBtn = panel.querySelector('#pb-run-analysis');
+    runAnalysisBtn?.addEventListener('click', async () => {
+        if (!isPlumBlossomActive) {
+            globalThis.toastr?.warning('Plum Blossom preset not detected.');
+            return;
+        }
+        if (!isPlumSeparateAnalysisEnabled()) {
+            globalThis.toastr?.info('Enable both Scene Analysis and Separate scene analysis first.');
+            return;
+        }
+
+        runAnalysisBtn.disabled = true;
+        runAnalysisBtn.textContent = 'Running...';
+        try {
+            const success = await executePlumAnalysis();
+            if (success) globalThis.toastr?.success('Scene analysis updated.', 'Plum Blossom');
+        } finally {
+            runAnalysisBtn.disabled = false;
+            runAnalysisBtn.textContent = 'Run Analysis';
+        }
+    });
+
+    panel.querySelector('#pb-open-debug')?.addEventListener('click', openPlumDebugInspector);
+
+    wirePlumBlossomControls(panel.querySelector('#pb-mode-controls'), {
+        syncPromptManager: syncPromptManagerDOM,
+        onChanged: refreshPanelUI,
+    });
 
     // Settings view: number inputs
     panel.querySelectorAll('.wl-input-number').forEach(input => {
@@ -953,6 +1185,20 @@ function wirePanelEvents(panel) {
         updateSepGenVisibility();
     }
 
+    const plumSepGenToggle = panel.querySelector('.wl-toggle input[data-key="plumBlossomSeparateAnalysis"]');
+    if (plumSepGenToggle) {
+        const updatePlumSepGenVisibility = () => {
+            const opts = panel.querySelector('#pb-sep-gen-options');
+            if (opts) opts.style.display = plumSepGenToggle.checked ? '' : 'none';
+            const runAnalysisBtn = panel.querySelector('#pb-run-analysis');
+            if (runAnalysisBtn) {
+                runAnalysisBtn.disabled = !isPlumBlossomActive || !isPlumSeparateAnalysisEnabled();
+            }
+        };
+        plumSepGenToggle.addEventListener('change', updatePlumSepGenVisibility);
+        updatePlumSepGenVisibility();
+    }
+
     // Settings view: auto-run select controls N row visibility
     const autoRunSelect = panel.querySelector('.wl-select[data-key="utilityAutoRun"]');
     if (autoRunSelect) {
@@ -962,6 +1208,16 @@ function wirePanelEvents(panel) {
         };
         autoRunSelect.addEventListener('change', updateNVisibility);
         updateNVisibility();
+    }
+
+    const plumAutoRunSelect = panel.querySelector('.wl-select[data-key="plumBlossomAnalysisAutoRun"]');
+    if (plumAutoRunSelect) {
+        const updatePlumNVisibility = () => {
+            const nRow = panel.querySelector('#pb-autorun-n-row');
+            if (nRow) nRow.style.display = plumAutoRunSelect.value === 'every_n' ? '' : 'none';
+        };
+        plumAutoRunSelect.addEventListener('change', updatePlumNVisibility);
+        updatePlumNVisibility();
     }
 
     // Custom tracker: add button
@@ -995,28 +1251,72 @@ function refreshPanelUI() {
 
     const settings = getSettings();
 
+    const viewingPlum = panelMode === PRESET_MODES.PLUM_BLOSSOM;
+    const viewedPresetActive = viewingPlum ? isPlumBlossomActive : isWhiteLotusActive;
+    const integrity = viewingPlum ? getPlumBlossomInstallState() : getInstallState();
+    const integrityStatus = panel.querySelector('#wl-integrity-status');
+    const integrityDetail = panel.querySelector('#wl-integrity-detail');
+    if (integrityStatus && integrityDetail) {
+        const labels = {
+            not_installed: 'Not installed',
+            update_available: 'Update available',
+            repair_available: 'Repair available',
+            newer_than_bundled: 'Newer than bundled',
+            up_to_date: 'Healthy',
+        };
+        integrityStatus.textContent = labels[integrity.status] || 'Unknown';
+        const installed = integrity.installedVersion ? `Installed ${integrity.installedVersion}. ` : '';
+        integrityDetail.textContent = `${installed}Bundled ${integrity.bundledVersion}. Version identity and required prompt blocks are checked separately.`;
+    }
+
+    const title = panel.querySelector('.wl-panel-title');
+    if (title) title.textContent = viewingPlum ? 'Plum Blossom' : 'White Lotus';
+    const modeTrigger = panel.querySelector('#wl-mode-trigger');
+    if (modeTrigger) {
+        modeTrigger.title = viewingPlum ? 'Switch to White Lotus' : 'Switch to Plum Blossom';
+        modeTrigger.setAttribute('aria-label', modeTrigger.title);
+    }
+
     // Status indicator
     const statusDot = panel.querySelector('.wl-status-dot');
     const statusText = panel.querySelector('.wl-status-text');
     if (statusDot && statusText) {
-        statusDot.classList.toggle('wl-status-active', isWhiteLotusActive);
-        if (isWhiteLotusActive) {
+        statusDot.classList.toggle('wl-status-active', viewedPresetActive);
+        if (viewingPlum && isPlumBlossomActive) {
+            statusText.textContent = `Plum Blossom${detectedPlumVersion ? ` ${detectedPlumVersion}` : ''} Active`;
+        } else if (!viewingPlum && isWhiteLotusActive) {
             const label = detectedVersion ? `White Lotus ${detectedVersion}` : 'White Lotus';
             const tag = detectedVariant ? ` [${detectedVariant}]` : '';
             statusText.textContent = `${label}${tag} Active`;
         } else {
-            statusText.textContent = 'Preset Not Detected';
+            statusText.textContent = `${viewingPlum ? 'Plum Blossom' : 'White Lotus'} Preset Not Active`;
         }
     }
 
-    // Disable controls if preset not active (except sampler — useful for any preset)
-    const controlsView = panel.querySelector('#wl-view-controls');
-    if (controlsView) {
-        controlsView.querySelectorAll('.wl-select, .wl-toggle input').forEach(el => {
-            if (el.id === 'wl-sampler-preset') return;
-            el.disabled = !isWhiteLotusActive;
-        });
-    }
+    panel.querySelector('#wl-mode-controls')?.classList.toggle('wl-hidden', viewingPlum);
+    panel.querySelector('#pb-mode-controls')?.classList.toggle('wl-hidden', !viewingPlum);
+    panel.querySelector('#wl-settings-tracker-gen')?.classList.toggle('wl-hidden', viewingPlum);
+    panel.querySelector('#pb-settings-analysis-gen')?.classList.toggle('wl-hidden', !viewingPlum);
+    panel.querySelector('#wl-settings-custom-trackers')?.classList.toggle('wl-hidden', viewingPlum);
+    panel.classList.toggle('wl-mode-plum', viewingPlum);
+    if (viewingPlum) refreshPlumBlossomControls(panel.querySelector('#pb-mode-controls'));
+
+    // Each view is tied only to its own preset. Samplers stay available for any
+    // active ST preset, including presets unrelated to either companion.
+    const whiteLotusControls = panel.querySelector('#wl-mode-controls');
+    whiteLotusControls?.querySelectorAll('.wl-select, .wl-toggle input, .wl-btn').forEach(el => {
+        if (el.matches('[data-sampler-preset]')) return;
+        el.disabled = !isWhiteLotusActive;
+    });
+    const pbControls = panel.querySelector('#pb-mode-controls');
+    pbControls?.querySelectorAll('.wl-select, .wl-toggle input, .wl-btn').forEach(el => {
+        if (el.matches('[data-sampler-preset]')) return;
+        el.disabled = !isPlumBlossomActive;
+    });
+
+    panel.querySelectorAll('#wl-view-settings .wl-select, #wl-view-settings .wl-toggle input, #wl-view-settings .wl-input-number, #wl-view-settings .wl-btn').forEach(el => {
+        el.disabled = !viewedPresetActive;
+    });
 
     // Sync select values
     panel.querySelectorAll('.wl-select').forEach(select => {
@@ -1026,10 +1326,23 @@ function refreshPanelUI() {
     });
 
     // Sync toggle values
-    panel.querySelectorAll('.wl-toggle input[type="checkbox"]').forEach(checkbox => {
+    panel.querySelectorAll('.wl-toggle input[type="checkbox"][data-key]').forEach(checkbox => {
         const key = checkbox.dataset.key;
         checkbox.checked = !!settings[key];
     });
+
+    const runAnalysisBtn = panel.querySelector('#pb-run-analysis');
+    if (runAnalysisBtn) {
+        runAnalysisBtn.disabled = !isPlumBlossomActive || !isPlumSeparateAnalysisEnabled();
+    }
+    updatePlumDebugButton(panel, isPlumBlossomActive);
+
+    const profileHint = panel.querySelector('#wl-profile-hint');
+    if (profileHint) {
+        profileHint.textContent = viewingPlum
+            ? 'Use a saved Connection Profile for separate scene analysis. If selected, PB will not silently fall back to the narrative model.'
+            : 'Use a saved Connection Profile for separate tracker generation. Current model uses the active chat connection.';
+    }
 
     // Sync number inputs
     panel.querySelectorAll('.wl-input-number').forEach(input => {
@@ -1043,11 +1356,18 @@ function refreshPanelUI() {
     const sepGenOpts = panel.querySelector('#wl-sep-gen-options');
     if (sepGenOpts) sepGenOpts.style.display = settings.useSeparateGen ? '' : 'none';
 
+    const plumSepGenOpts = panel.querySelector('#pb-sep-gen-options');
+    if (plumSepGenOpts) plumSepGenOpts.style.display = settings.plumBlossomSeparateAnalysis ? '' : 'none';
+
     const nRow = panel.querySelector('#wl-autorun-n-row');
     if (nRow) nRow.style.display = settings.utilityAutoRun === 'every_n' ? '' : 'none';
 
+    const plumNRow = panel.querySelector('#pb-autorun-n-row');
+    if (plumNRow) plumNRow.style.display = settings.plumBlossomAnalysisAutoRun === 'every_n' ? '' : 'none';
+
     renderCustomTrackerList();
-    updatePayloadDisplay();
+    renderPayloadCounter(panelMode, viewedPresetActive);
+    updateInstallerButton();
 }
 
 // ============================================================
@@ -1055,12 +1375,12 @@ function refreshPanelUI() {
 // ============================================================
 
 function getActiveSettings() {
-    // Lightweight guard — if the preset name no longer contains "White Lotus",
-    // force inactive. Catches stale state when OAI_PRESET_CHANGED_AFTER is missing.
+    // Lightweight guard — re-check signatures at generation time in case the
+    // active preset changed without OAI_PRESET_CHANGED_AFTER firing.
     if (isWhiteLotusActive) {
-        const presetName = oai_settings.preset_settings_openai || '';
-        if (!/white\s*lotus/i.test(presetName)) {
-            log('Preset name no longer matches — deactivating');
+        const { state } = classifyPromptOrder(getActivePromptOrder());
+        if (state === 'none') {
+            log('Active preset no longer matches WL signatures — deactivating');
             isWhiteLotusActive = false;
         }
     }
@@ -1115,15 +1435,21 @@ function initConnectionProfileDropdown() {
 jQuery(async () => {
     log('Initializing...');
 
-    ensureSettings();
+    const initialSettings = ensureSettings();
+    panelMode = initialSettings.panelMode === PRESET_MODES.PLUM_BLOSSOM
+        ? PRESET_MODES.PLUM_BLOSSOM
+        : PRESET_MODES.WHITE_LOTUS;
 
     createTriggerButton();
     createPanel();
+    initPromptControlOwnership(getActivePresetMode);
 
     refreshPresetDetection();
 
     initGenerationHooks(getActiveSettings);
     initUtilitiesGen(() => isWhiteLotusActive);
+    initPlumAnalysis(() => isPlumBlossomActive);
+    initPlumDebugInspector(() => isPlumBlossomActive);
 
     eventSource.on(event_types.CHAT_CHANGED, () => {
         refreshPresetDetection();
@@ -1135,7 +1461,9 @@ jQuery(async () => {
         });
     }
 
+    initPayloadCounter(getActivePresetMode, refreshPayloadDisplay);
     initConnectionProfileDropdown();
+    refreshPanelUI();
 
     // UI modules (drawer takeovers, Chat Design) now live in UI Bedazzler
 
