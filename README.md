@@ -4,9 +4,9 @@
   <br><br>
 </p>
 
-# White Lotus / Plum Blossom
+# White Lotus 
 
-A companion extension for the *White Lotus* and *Plum Blossom* presets for SillyTavern.
+A companion extension for the *White Lotus* (and *Plum Blossom*) presets for SillyTavern.
 
 `Current Preset Versions: White Lotus [4.2.1] · Plum Blossom [1.0.0]`
 

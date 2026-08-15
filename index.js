@@ -96,6 +96,12 @@ const { log, logError } = createLogger();
 
 let isWhiteLotusActive = false;
 let isPlumBlossomActive = false;
+// Runtime suspend (not persisted): while set, White Lotus / Plum Blossom act as
+// if no supported preset is active — generation hooks, separate-gen, and the
+// Prompt Manager ownership lock all stand down. The UI Bedazzler "Preset Drawer
+// Expanded" flips this on while it's open so the raw preset can be tested
+// without WL's runtime taking over prompt blocks, trackers, or scene analysis.
+let isSuspended = false;
 let isPanelOpen = false;
 let isPanelPinned = false;
 let detectedVersion = null;
@@ -302,9 +308,24 @@ function updateTriggerButton() {
 }
 
 function getActivePresetMode() {
+    if (isSuspended) return null;
     if (isPlumBlossomActive) return PRESET_MODES.PLUM_BLOSSOM;
     if (isWhiteLotusActive) return PRESET_MODES.WHITE_LOTUS;
     return null;
+}
+
+/** Suspend / resume White Lotus's runtime takeover without unloading it.
+ *  Exposed on window.WhiteLotus for the UI Bedazzler preset drawer. */
+function setSuspended(next) {
+    const value = !!next;
+    if (isSuspended === value) return;
+    isSuspended = value;
+    log(value
+        ? 'Suspended — preset drawer open; runtime takeover paused'
+        : 'Resumed — runtime takeover re-enabled');
+    // Drop or restore the read-only ownership lock on Prompt Manager rows live.
+    refreshPromptControlOwnership();
+    updateTriggerButton();
 }
 
 async function togglePresetMode(panel) {
@@ -1385,6 +1406,7 @@ function getActiveSettings() {
         }
     }
 
+    if (isSuspended) return null;
     if (!isWhiteLotusActive) return null;
     return getSettings();
 }
@@ -1447,9 +1469,16 @@ jQuery(async () => {
     refreshPresetDetection();
 
     initGenerationHooks(getActiveSettings);
-    initUtilitiesGen(() => isWhiteLotusActive);
-    initPlumAnalysis(() => isPlumBlossomActive);
+    initUtilitiesGen(() => isWhiteLotusActive && !isSuspended);
+    initPlumAnalysis(() => isPlumBlossomActive && !isSuspended);
     initPlumDebugInspector(() => isPlumBlossomActive);
+
+    // Public control surface for the UI Bedazzler preset drawer (optional peer).
+    globalThis.WhiteLotus = Object.assign(globalThis.WhiteLotus || {}, {
+        suspend: () => setSuspended(true),
+        resume: () => setSuspended(false),
+        isSuspended: () => isSuspended,
+    });
 
     eventSource.on(event_types.CHAT_CHANGED, () => {
         refreshPresetDetection();
