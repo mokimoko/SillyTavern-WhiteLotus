@@ -7,7 +7,7 @@ import {
     getPresetMetadata, getSemanticVersionFromName, presetNamesEqual,
 } from './presetMetadata.js';
 
-export const BUNDLED_PB_VERSION = '1.0.0';
+export const BUNDLED_PB_VERSION = '1.1.0';
 export const INSTALLED_PB_NAME = PRESET_NAMES.PLUM_BLOSSOM;
 
 // Bundled filename kept ASCII-basic for portability; INSTALLED_PB_NAME (the
