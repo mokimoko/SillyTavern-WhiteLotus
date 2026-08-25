@@ -8,7 +8,7 @@
 
 A companion extension for the *White Lotus* (and *Plum Blossom*) presets for SillyTavern.
 
-`Current Preset Versions: White Lotus [4.2.1] · Plum Blossom [1.0.0]`
+`Current Preset Versions: White Lotus [4.2.1] · Plum Blossom [1.1.0]`
 
 Both White Lotus and Plum Blossom can still be used as standalone presets, but this extension makes it easy to toggle features on and off without digging through the prompt manager. 
 
