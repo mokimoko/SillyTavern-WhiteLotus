@@ -26,7 +26,7 @@ const { log, logWarn, logError } = createLogger('Installer');
 // Constants — bump BUNDLED_VERSION alongside the bundled preset each release
 // ============================================================
 
-export const BUNDLED_VERSION = '4.2.1';
+export const BUNDLED_VERSION = '4.3.0';
 
 /** Stable name the preset is saved under. Kept constant so updates overwrite in place. */
 export const INSTALLED_PRESET_NAME = PRESET_NAMES.WHITE_LOTUS;

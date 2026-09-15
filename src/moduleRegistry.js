@@ -41,6 +41,7 @@ export const TOGGLES = {
     fixAntiSlop:        { category: 'Fixes', label: 'Anti-Slop',         settingDefault: false, promptIds: ['05233b1e-de2c-430a-8a97-13284c37dae5'] },
     fixConsent:         { category: 'Fixes', label: 'Consent Override',   settingDefault: false, promptIds: ['ac239e00-fe78-4edc-bb50-f2689f23d89d'] },
     fixKimiWrangling:   { category: 'Fixes', label: 'Kimi Wrangling',    settingDefault: false, promptIds: ['b14b45f9-b8f6-4b0b-95d0-a2f253385645', '3889da79-c9c0-49fd-92dc-a2014cbeb8f1'] },
+    fixJailbreak:       { category: 'Fixes', label: '⚠︎ Jailbreak',       settingDefault: false, promptIds: ['93253ed2-69a8-446f-9cd3-ed92761ff907'] },
 
     // --- Tools ---
     toolNPCCrafter:     { category: 'Tools', label: 'NPC Crafter',       settingDefault: false, promptIds: ['7ff54f24-9031-4d44-96bf-6a59d1d144af'] },
@@ -221,6 +222,7 @@ export const INFRA = {
         '8f1944bb-7f94-4e1a-ae23-1a8c20261ba0',  // Flexible length
         '05233b1e-de2c-430a-8a97-13284c37dae5',  // Anti-Slop
         '7ff54f24-9031-4d44-96bf-6a59d1d144af',  // NPC Crafter
+        '93253ed2-69a8-446f-9cd3-ed92761ff907',  // Jailbreak (4.3.0+)
     ],
 };
 
