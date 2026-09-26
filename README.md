@@ -51,3 +51,12 @@ White Lotus and Plum Blossom can be installed or updated from the extension pane
 3. Toggle modules or PB Choose options — changes are live in the active preset
 4. Configure tracker or analysis sidecars through the ⚙ settings view
 5. Pin the panel open with the thumbtack if you want it to stay while you chat
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
